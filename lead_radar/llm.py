@@ -7,10 +7,70 @@ from typing import Any, Iterable
 
 import httpx
 
-from .models import AuthorType, CommercialIntent, LLMClassification, LLMDecision, Opportunity
+from .models import AuthorType, CommercialIntent, ContactStrategy, LeadBrief, LLMClassification, LLMDecision, Opportunity
 
 
 CLASSIFIER_SCHEMA_VERSION = "lead-radar-v1"
+
+BRIEF_SCHEMA_VERSION = "lead-radar-brief-v1"
+
+BRIEF_SYSTEM_PROMPT = """You prepare one concise action brief for the developer, a Python backend developer focused on APIs, automation, business workflows and practical AI integrations.
+
+This is for a private lead radar. Use only facts supplied in the candidate. Never invent clients, years of experience, production deployments, testimonials, Make/n8n specialist credentials, or technologies not supported by the supplied profile/context.
+
+Return a practical brief that helps the developer decide and act in under 30 seconds:
+- exact problem: concrete owned/business pain, not generic topic summary;
+- why_fit: why the developer can realistically handle THIS technical slice;
+- money_signal: explicit payment signal if present, otherwise clearly say payment is not explicit;
+- suggested_scope: one bounded paid milestone, unless the opportunity is clearly larger, in which case make the first milestone a trust-reduction step without shrinking the whole project;
+- suggested_price_band: realistic USD range. Typical anchors: webhook/debug $75-200, API integration $125-300, CSV/Excel automation $75-200, document extraction $100-300, AI/backend rescue $150-500, larger multi-day system $500-2000+;
+- contact_strategy: PUBLIC_REPLY, DM, EMAIL, PUBLIC_REPLY_THEN_DM, APPLY_FORM, or IGNORE;
+- draft: short natural English message, usually 60-140 words, tailored to concrete facts.
+
+Outreach rules:
+- Never use em dash or en dash characters. Use normal commas, periods, colons and ordinary hyphens only when needed.
+- Do not write generic AI/sales phrases such as "I came across your post", "I am excited", "I am passionate", "I believe I would be a great fit", "With my extensive experience", "I'd love to leverage", "cutting-edge", "seamless", or "robust solutions".
+- Do not list the full stack.
+- For Make/n8n Questions, prefer a useful PUBLIC_REPLY and do not lead with a sales pitch unless the author explicitly asks to hire/pay.
+- If the post is a normal recruiter/employment flow, service-provider post, learner request, OSS task, or otherwise not appropriate to contact, use IGNORE and leave draft empty.
+- Be conservative and honest.
+"""
+
+BRIEF_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "opportunity_id": {"type": "integer"},
+        "problem_summary": {"type": "string"},
+        "why_fit": {"type": "string"},
+        "money_signal": {"type": "string"},
+        "suggested_scope": {"type": "string"},
+        "suggested_price_band": {"type": "string"},
+        "contact_strategy": {
+            "type": "string",
+            "enum": ["PUBLIC_REPLY", "DM", "EMAIL", "PUBLIC_REPLY_THEN_DM", "APPLY_FORM", "IGNORE"],
+        },
+        "draft": {"type": "string"},
+        "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+    },
+    "required": [
+        "opportunity_id", "problem_summary", "why_fit", "money_signal",
+        "suggested_scope", "suggested_price_band", "contact_strategy", "draft", "confidence"
+    ],
+    "additionalProperties": False,
+}
+
+FORBIDDEN_DRAFT_PHRASES = (
+    "i came across your post",
+    "i am excited",
+    "i'm excited",
+    "i am passionate",
+    "i believe i would be a great fit",
+    "with my extensive experience",
+    "i'd love to leverage",
+    "cutting-edge",
+    "seamless",
+    "robust solutions",
+)
 
 CLASSIFIER_SYSTEM_PROMPT = """You classify inbound public posts for a private lead radar used by one Python backend developer.
 
@@ -213,6 +273,52 @@ def _candidate_text(opportunity_id: int, opportunity: Opportunity, max_chars: in
     )
 
 
+
+def _sanitize_draft(text: str) -> str:
+    return text.replace("—", "-").replace("–", "-").strip()
+
+
+def parse_lead_brief(item: dict[str, Any]) -> LeadBrief:
+    try:
+        opportunity_id = int(item["opportunity_id"])
+        strategy = ContactStrategy(str(item["contact_strategy"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LLMAPIError("Model returned an invalid lead brief schema") from exc
+    draft = _sanitize_draft(str(item.get("draft") or ""))
+    lowered = draft.casefold()
+    if any(phrase in lowered for phrase in FORBIDDEN_DRAFT_PHRASES):
+        raise LLMAPIError("Model returned generic outreach copy")
+    return LeadBrief(
+        opportunity_id=opportunity_id,
+        problem_summary=str(item.get("problem_summary") or "")[:500].strip(),
+        why_fit=str(item.get("why_fit") or "")[:500].strip(),
+        money_signal=str(item.get("money_signal") or "")[:300].strip(),
+        suggested_scope=str(item.get("suggested_scope") or "")[:500].strip(),
+        suggested_price_band=str(item.get("suggested_price_band") or "")[:120].strip(),
+        contact_strategy=strategy,
+        draft=draft[:1200],
+        confidence=_clamp_score(item.get("confidence")),
+    )
+
+
+def _brief_candidate_text(
+    opportunity_id: int,
+    opportunity: Opportunity,
+    context: dict[str, Any],
+    max_chars: int,
+) -> str:
+    return (
+        f"ID: {opportunity_id}\n"
+        f"SOURCE: {opportunity.source}\n"
+        f"AUTHOR: {opportunity.author or ''}\n"
+        f"URL: {opportunity.url}\n"
+        f"CREATED_AT: {opportunity.created_at.astimezone(timezone.utc).isoformat()}\n"
+        f"COMMERCIAL_CONTEXT: {json.dumps(context, ensure_ascii=False)}\n"
+        f"TITLE: {opportunity.title[:500]}\n"
+        f"BODY:\n{opportunity.body[:max_chars]}"
+    )
+
+
 class OpenAILeadClassifier:
     def __init__(
         self,
@@ -280,6 +386,71 @@ class OpenAILeadClassifier:
             output_tokens=output_tokens,
             estimated_cost_usd=cost,
         )
+
+    def estimate_brief_cost(
+        self,
+        opportunity_id: int,
+        opportunity: Opportunity,
+        context: dict[str, Any],
+    ) -> float:
+        chars = len(BRIEF_SYSTEM_PROMPT) + len(
+            _brief_candidate_text(opportunity_id, opportunity, context, self.max_post_chars)
+        )
+        estimated_input_tokens = max(1, chars // 3)
+        estimated_output_tokens = min(self.max_output_tokens, 650)
+        return (
+            estimated_input_tokens * self.input_price_per_mtok
+            + estimated_output_tokens * self.output_price_per_mtok
+        ) / 1_000_000
+
+    async def generate_brief(
+        self,
+        opportunity_id: int,
+        opportunity: Opportunity,
+        context: dict[str, Any],
+    ) -> tuple[LeadBrief, LLMUsage]:
+        if not self.api_key:
+            raise LLMAPIError("OPENAI_API_KEY is not configured")
+        user_content = _brief_candidate_text(opportunity_id, opportunity, context, self.max_post_chars)
+        payload = {
+            "model": self.model,
+            "store": False,
+            "reasoning": {"effort": "none"},
+            "max_output_tokens": self.max_output_tokens,
+            "input": [
+                {"role": "system", "content": BRIEF_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "lead_radar_brief_v1",
+                    "strict": True,
+                    "schema": BRIEF_SCHEMA,
+                }
+            },
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, transport=self.transport) as client:
+                response = await client.post("https://api.openai.com/v1/responses", headers=headers, json=payload)
+        except httpx.HTTPError:
+            raise LLMAPIError("OpenAI API network request failed") from None
+        if response.status_code >= 400:
+            raise LLMAPIError(f"OpenAI API returned HTTP {response.status_code}") from None
+        try:
+            raw = response.json()
+            parsed = json.loads(extract_output_text(raw))
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise LLMAPIError("OpenAI API returned invalid structured output") from exc
+        if not isinstance(parsed, dict):
+            raise LLMAPIError("OpenAI API lead brief payload was incomplete")
+        brief = parse_lead_brief(parsed)
+        if brief.opportunity_id != opportunity_id:
+            raise LLMAPIError("OpenAI API returned a lead brief for the wrong opportunity")
+        usage = self._cost_from_usage(raw.get("usage") if isinstance(raw.get("usage"), dict) else {})
+        usage.response_id = str(raw.get("id")) if raw.get("id") else None
+        return brief, usage
 
     async def classify(
         self,

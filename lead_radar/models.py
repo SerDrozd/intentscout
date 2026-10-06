@@ -36,6 +36,15 @@ class LLMDecision(StrEnum):
     REJECT = "REJECT"
 
 
+class ContactStrategy(StrEnum):
+    PUBLIC_REPLY = "PUBLIC_REPLY"
+    DM = "DM"
+    EMAIL = "EMAIL"
+    PUBLIC_REPLY_THEN_DM = "PUBLIC_REPLY_THEN_DM"
+    APPLY_FORM = "APPLY_FORM"
+    IGNORE = "IGNORE"
+
+
 class OpportunityClass(StrEnum):
     CASH_NOW = "CASH_NOW"
     HIGH_VALUE = "HIGH_VALUE"
@@ -142,3 +151,16 @@ class LLMClassification:
     problem_summary: str
     rejection_reason: str
     decision: LLMDecision = LLMDecision.REVIEW
+
+
+@dataclass(slots=True)
+class LeadBrief:
+    opportunity_id: int
+    problem_summary: str
+    why_fit: str
+    money_signal: str
+    suggested_scope: str
+    suggested_price_band: str
+    contact_strategy: ContactStrategy
+    draft: str
+    confidence: int

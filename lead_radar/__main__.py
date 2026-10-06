@@ -27,6 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     llm_classify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     llm_classify.add_argument("--force", action="store_true", help="Reclassify rows that already have an LLM decision")
     sub.add_parser("llm-stats", help="Show LLM token/cost budget usage")
+    prepare = sub.add_parser("prepare", help="Generate or show an action brief and outreach draft for one lead")
+    prepare.add_argument("--id", type=int, required=True, dest="opportunity_id")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -80,6 +82,31 @@ async def async_main(args: argparse.Namespace) -> int:
         usage["monthly_budget_usd"] = settings.monthly_llm_budget_usd
         usage["model"] = settings.llm_model
         print(usage)
+        return 0
+    if args.command == "prepare":
+        if not settings.llm_enabled:
+            print("LLM generation is disabled by LLM_ENABLED=false.")
+            return 2
+        if not settings.openai_api_key:
+            print("OPENAI_API_KEY is not configured in .env; no API request was made.")
+            return 2
+        try:
+            brief = await app.prepare_lead(args.opportunity_id)
+        except (LLMAPIError, LLMBudgetExceeded) as exc:
+            print(f"Lead brief generation stopped safely: {exc}")
+            return 2
+        if brief is None:
+            print("Lead not found, rejected, or not eligible for a brief.")
+            return 2
+        print(
+            f"#{brief.opportunity_id} confidence={brief.confidence} action={brief.contact_strategy.value}\n"
+            f"PROBLEM: {brief.problem_summary}\n"
+            f"WHY FIT: {brief.why_fit}\n"
+            f"MONEY: {brief.money_signal}\n"
+            f"SCOPE: {brief.suggested_scope}\n"
+            f"PRICE: {brief.suggested_price_band}\n"
+            f"DRAFT:\n{brief.draft}"
+        )
         return 0
     if args.command == "llm-classify":
         if not settings.llm_enabled:

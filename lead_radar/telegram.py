@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from .database import Database
-from .models import ScoredOpportunity
+from .models import LeadBrief, ScoredOpportunity
 from .text import normalize_text
 
 
@@ -67,33 +68,69 @@ class TelegramClient:
             raise TelegramAPIError(f"Telegram API returned HTTP {response.status_code}{suffix}") from None
         return response
 
-    async def send_alert(self, opportunity_id: int, scored: ScoredOpportunity) -> bool:
+    @staticmethod
+    def _age_label(created_at: datetime) -> str:
+        created = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        seconds = max(0, int((datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()))
+        if seconds < 3600:
+            return f"{max(1, seconds // 60)}m"
+        if seconds < 86400:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 86400}d"
+
+    async def send_alert(
+        self,
+        opportunity_id: int,
+        scored: ScoredOpportunity,
+        brief: LeadBrief | None = None,
+    ) -> bool:
         if not self.enabled:
             return False
         o = scored.opportunity
-        matches = scored.analysis.phrase_matches[:8]
-        match_lines = "\n".join(f"• {m.phrase}" for m in matches)
-        breakdown = "\n".join(f"• {k}: {v:+d}" for k, v in scored.breakdown.items())
-        excerpt = normalize_text(o.body)[:900]
-        if scored.assessment is not None:
-            a = scored.assessment
+        a = scored.assessment
+        if a is not None:
+            icon = {
+                "P0_CASH": "🔥",
+                "P0_HIGH_VALUE": "💰",
+                "P0_RELATIONSHIP": "♻️",
+            }.get(a.alert_class.value, "🔥")
             headline = (
-                f"🔥 {a.alert_class.value} | CASH {a.cash_score} | VALUE {a.value_score} | REL {a.relationship_score}"
+                f"{icon} {a.alert_class.value} | CASH {a.cash_score} | VALUE {a.value_score} | REL {a.relationship_score}"
             )
             commercial = (
-                f"AUTHOR {a.author_type.value} | INTENT {a.commercial_intent.value} | "
-                f"FRESH {a.freshness_score} | COMP {a.competition_score}"
+                f"{a.author_type.value} | {a.commercial_intent.value} | "
+                f"AGE {self._age_label(o.created_at)} | COMP {a.competition_score}"
             )
         else:
             headline = f"🔥 {scored.score} - HIGH INTENT"
-            commercial = ""
-        text = (
-            f"{headline}\n{commercial}\n\n"
-            f"{o.source} · {o.title[:220]}\n\n"
-            f"{excerpt}\n\n"
-            f"MATCHES\n{match_lines}\n\n"
-            f"LEGACY SIGNAL SCORE\n{breakdown}"
-        )[:3900]
+            commercial = f"AGE {self._age_label(o.created_at)}"
+
+        author = o.author or "unknown"
+        replies = o.metadata.get("reply_count", o.metadata.get("comments"))
+        reply_line = f" | replies={replies}" if replies is not None else ""
+
+        if brief is not None:
+            draft = brief.draft or "(no draft generated)"
+            text = (
+                f"{headline}\n{commercial}\n\n"
+                f"{o.source} · {author}{reply_line}\n{o.title[:220]}\n{o.url}\n\n"
+                f"EXACT PROBLEM:\n{brief.problem_summary}\n\n"
+                f"WHY FIT:\n{brief.why_fit}\n\n"
+                f"MONEY SIGNAL:\n{brief.money_signal}\n\n"
+                f"SUGGESTED SCOPE:\n{brief.suggested_scope}\n\n"
+                f"PRICE:\n{brief.suggested_price_band}\n\n"
+                f"NEXT ACTION:\n{brief.contact_strategy.value}\n\n"
+                f"DRAFT:\n{draft}"
+            )[:3900]
+        else:
+            matches = scored.analysis.phrase_matches[:6]
+            match_lines = "\n".join(f"• {m.phrase}" for m in matches)
+            excerpt = normalize_text(o.body)[:1000]
+            text = (
+                f"{headline}\n{commercial}\n\n"
+                f"{o.source} · {author}{reply_line}\n{o.title[:220]}\n{o.url}\n\n"
+                f"{excerpt}\n\nMATCHES\n{match_lines}"
+            )[:3900]
         keyboard = {
             "inline_keyboard": [
                 [{"text": "Open", "url": o.url}],

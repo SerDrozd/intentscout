@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .models import CommercialAssessment, LLMClassification, ScoredOpportunity
+from .models import CommercialAssessment, ContactStrategy, LeadBrief, LLMClassification, ScoredOpportunity
 
 
 SCHEMA = """
@@ -96,6 +96,21 @@ CREATE TABLE IF NOT EXISTS llm_classifications (
     problem_summary TEXT NOT NULL,
     rejection_reason TEXT NOT NULL,
     raw_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS lead_briefs (
+    opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    problem_summary TEXT NOT NULL,
+    why_fit TEXT NOT NULL,
+    money_signal TEXT NOT NULL,
+    suggested_scope TEXT NOT NULL,
+    suggested_price_band TEXT NOT NULL,
+    contact_strategy TEXT NOT NULL,
+    draft TEXT NOT NULL,
+    confidence INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
 
@@ -476,6 +491,68 @@ class Database:
                 ),
             )
 
+    def save_lead_brief(self, brief: LeadBrief, *, model: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO lead_briefs (
+                    opportunity_id, model, problem_summary, why_fit, money_signal,
+                    suggested_scope, suggested_price_band, contact_strategy, draft,
+                    confidence, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(opportunity_id) DO UPDATE SET
+                    model=excluded.model,
+                    problem_summary=excluded.problem_summary,
+                    why_fit=excluded.why_fit,
+                    money_signal=excluded.money_signal,
+                    suggested_scope=excluded.suggested_scope,
+                    suggested_price_band=excluded.suggested_price_band,
+                    contact_strategy=excluded.contact_strategy,
+                    draft=excluded.draft,
+                    confidence=excluded.confidence,
+                    created_at=excluded.created_at
+                """,
+                (
+                    brief.opportunity_id, model, brief.problem_summary, brief.why_fit,
+                    brief.money_signal, brief.suggested_scope, brief.suggested_price_band,
+                    brief.contact_strategy.value, brief.draft, brief.confidence, now,
+                ),
+            )
+
+    def get_lead_brief(self, opportunity_id: int) -> LeadBrief | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM lead_briefs WHERE opportunity_id=?",
+                (opportunity_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return LeadBrief(
+            opportunity_id=int(row["opportunity_id"]),
+            problem_summary=str(row["problem_summary"]),
+            why_fit=str(row["why_fit"]),
+            money_signal=str(row["money_signal"]),
+            suggested_scope=str(row["suggested_scope"]),
+            suggested_price_band=str(row["suggested_price_band"]),
+            contact_strategy=ContactStrategy(str(row["contact_strategy"])),
+            draft=str(row["draft"]),
+            confidence=int(row["confidence"]),
+        )
+
+    def opportunity_row(self, opportunity_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT id, source, external_id, url, title, body, author, created_at, metadata_json,
+                       author_type, commercial_intent, opportunity_class, alert_class,
+                       cash_score, value_score, relationship_score, freshness_score,
+                       competition_score, llm_decision, llm_confidence
+                FROM opportunities WHERE id=?
+                """,
+                (opportunity_id,),
+            ).fetchone()
+
     def record_llm_usage(
         self,
         *,
@@ -550,6 +627,14 @@ class Database:
                 """,
                 (hour_cutoff,),
             ).fetchone()
+            details = conn.execute(
+                """
+                SELECT COALESCE(SUM(candidate_count), 0) candidates
+                FROM llm_usage
+                WHERE created_at LIKE ? AND status='ok' AND purpose='lead_brief'
+                """,
+                (f"{day_prefix}%",),
+            ).fetchone()
         return {
             "input_tokens_today": int(today["input_tokens"]),
             "output_tokens_today": int(today["output_tokens"]),
@@ -560,6 +645,7 @@ class Database:
             "estimated_cost_month": float(month["cost"]),
             "llm_requests_month": int(month["requests"]),
             "classified_candidates_month": int(month["candidates"]),
+            "detailed_generations_today": int(details["candidates"]),
         }
 
     def recent(self, limit: int = 20) -> list[sqlite3.Row]:

@@ -13,7 +13,7 @@ from .config import Settings, load_keyword_config
 from .database import Database
 from .llm import CLASSIFIER_SCHEMA_VERSION, LLMAPIError, LLMBudgetExceeded, OpenAILeadClassifier
 from .matcher import Matcher
-from .models import LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
+from .models import LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
 from .scoring import score
 from .telegram import TelegramAPIError, TelegramClient
 
@@ -228,6 +228,90 @@ class RadarApp:
         opportunities = [(int(row["id"]), self._row_to_opportunity(row)) for row in rows]
         return await self._classify_opportunities(opportunities, purpose="shortlist")
 
+    @staticmethod
+    def _brief_context_from_row(row: sqlite3.Row) -> dict[str, object]:
+        return {
+            "author_type": str(row["author_type"]),
+            "commercial_intent": str(row["commercial_intent"]),
+            "opportunity_class": str(row["opportunity_class"]),
+            "alert_class": str(row["alert_class"]),
+            "cash_score": int(row["cash_score"]),
+            "value_score": int(row["value_score"]),
+            "relationship_score": int(row["relationship_score"]),
+            "freshness_score": int(row["freshness_score"]),
+            "competition_score": int(row["competition_score"]),
+            "llm_decision": str(row["llm_decision"]),
+            "llm_confidence": row["llm_confidence"],
+        }
+
+    async def _generate_lead_brief(
+        self,
+        opportunity_id: int,
+        opportunity: Opportunity,
+        context: dict[str, object],
+    ) -> LeadBrief | None:
+        existing = self.db.get_lead_brief(opportunity_id)
+        if existing is not None:
+            return existing
+        if not self.settings.llm_enabled or not self.llm.enabled:
+            return None
+
+        remaining, daily_usd, monthly_usd = self._budget_capacity()
+        if remaining <= 0:
+            raise LLMBudgetExceeded("LLM candidate budget reached")
+        estimated = self.llm.estimate_brief_cost(opportunity_id, opportunity, context)
+        if estimated > daily_usd or estimated > monthly_usd:
+            raise LLMBudgetExceeded("LLM dollar budget reached")
+
+        brief, usage = await self.llm.generate_brief(opportunity_id, opportunity, context)
+        self.db.record_llm_usage(
+            purpose="lead_brief",
+            model=self.settings.llm_model,
+            response_id=usage.response_id,
+            candidate_count=1,
+            input_tokens=usage.input_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            output_tokens=usage.output_tokens,
+            estimated_cost_usd=usage.estimated_cost_usd,
+        )
+        self.db.save_lead_brief(brief, model=self.settings.llm_model)
+        return brief
+
+    async def prepare_lead(self, opportunity_id: int) -> LeadBrief | None:
+        row = self.db.opportunity_row(opportunity_id)
+        if row is None:
+            return None
+        if str(row["llm_decision"]) == LLMDecision.REJECT.value:
+            return None
+        opportunity = self._row_to_opportunity(row)
+        return await self._generate_lead_brief(
+            opportunity_id,
+            opportunity,
+            self._brief_context_from_row(row),
+        )
+
+    async def _brief_for_scored(self, opportunity_id: int, scored: ScoredOpportunity) -> LeadBrief | None:
+        existing = self.db.get_lead_brief(opportunity_id)
+        if existing is not None:
+            return existing
+        assessment = scored.assessment
+        if assessment is None:
+            return None
+        context: dict[str, object] = {
+            "author_type": assessment.author_type.value,
+            "commercial_intent": assessment.commercial_intent.value,
+            "opportunity_class": assessment.opportunity_class.value,
+            "alert_class": assessment.alert_class.value,
+            "cash_score": assessment.cash_score,
+            "value_score": assessment.value_score,
+            "relationship_score": assessment.relationship_score,
+            "freshness_score": assessment.freshness_score,
+            "competition_score": assessment.competition_score,
+            "llm_decision": self.db.llm_decisions([opportunity_id]).get(opportunity_id, "NOT_RUN"),
+        }
+        return await self._generate_lead_brief(opportunity_id, scored.opportunity, context)
+
     async def _auto_classify_review_candidates(self, stats: CycleStats) -> None:
         if not self.settings.llm_enabled or not self.llm.enabled:
             return
@@ -365,8 +449,15 @@ class RadarApp:
         for i, (_, opportunity_id, scored) in enumerate(selected):
             if i:
                 await asyncio.sleep(self.settings.telegram_min_send_interval_seconds)
+            brief: LeadBrief | None = None
             try:
-                if await self.telegram.send_alert(opportunity_id, scored):
+                brief = await self._brief_for_scored(opportunity_id, scored)
+            except LLMBudgetExceeded as exc:
+                log.info("Lead brief generation skipped for %s: %s", opportunity_id, exc)
+            except LLMAPIError as exc:
+                log.warning("Lead brief generation failed safely for %s: %s", opportunity_id, exc)
+            try:
+                if await self.telegram.send_alert(opportunity_id, scored, brief):
                     stats.alerted += 1
             except TelegramAPIError as exc:
                 # TelegramAPIError deliberately contains no bot token / URL.

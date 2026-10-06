@@ -332,3 +332,26 @@ SQLite additions:
 - `opportunities.llm_decision`: `NOT_RUN`, `PASS`, `REVIEW`, or `REJECT`.
 
 `reclassify` invalidates stale LLM decisions because deterministic evidence may have changed.
+
+## Phase 4: action briefs and Telegram money cards
+
+For a shortlisted lead, generate or reuse a compact action brief:
+
+```powershell
+python -m lead_radar prepare --id 2127
+```
+
+The brief contains:
+- exact problem;
+- why the task fits the developer's real Python/backend/API/automation skill set;
+- money/payment signal;
+- one bounded first milestone;
+- suggested USD price band;
+- contact strategy (`PUBLIC_REPLY`, `DM`, `EMAIL`, `PUBLIC_REPLY_THEN_DM`, `APPLY_FORM`, `IGNORE`);
+- a short personalized English draft.
+
+Drafts are validated deterministically. Em/en dashes are removed, and generic phrases such as `I came across your post`, `I am excited`, `I believe I would be a great fit`, `cutting-edge`, `seamless`, and `robust solutions` are rejected.
+
+For a live P0 lead that survives the deterministic and LLM precision gates, Lead Radar tries to create the same brief before sending Telegram. If the OpenAI budget is exhausted or the API fails, ingestion continues and Telegram falls back to a shorter deterministic card rather than dropping the lead.
+
+`python -m lead_radar llm-stats` now also includes `detailed_generations_today`.
