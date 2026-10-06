@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -130,6 +130,28 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 );
 
 CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS collector_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    fetched INTEGER NOT NULL,
+    matched INTEGER NOT NULL,
+    inserted INTEGER NOT NULL,
+    excluded INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_collector_runs_source_created ON collector_runs(source, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS llm_usage_items (
+    usage_id INTEGER NOT NULL REFERENCES llm_usage(id) ON DELETE CASCADE,
+    opportunity_id INTEGER NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+    PRIMARY KEY (usage_id, opportunity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_items_opportunity ON llm_usage_items(opportunity_id);
 """
 
 
@@ -269,13 +291,51 @@ class Database:
                 (datetime.now(timezone.utc).isoformat(), opportunity_id),
             )
 
-    def set_status(self, opportunity_id: int, status: str, reason: str | None = None) -> None:
+    def set_status(
+        self,
+        opportunity_id: int,
+        status: str,
+        reason: str | None = None,
+        revenue: float | None = None,
+    ) -> None:
+        allowed = {"new", "ignored", "contacted", "replied", "proposal", "won", "lost"}
+        if status not in allowed:
+            raise ValueError(f"Unsupported lead status: {status}")
+        if revenue is not None and revenue < 0:
+            raise ValueError("Revenue cannot be negative")
         now = datetime.now(timezone.utc).isoformat()
         with self.connect() as conn:
+            exists = conn.execute("SELECT 1 FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()
+            if exists is None:
+                raise ValueError(f"Opportunity #{opportunity_id} does not exist")
             conn.execute("UPDATE opportunities SET status=? WHERE id=?", (status, opportunity_id))
             conn.execute(
-                "INSERT INTO actions (opportunity_id, action, reason, created_at) VALUES (?, ?, ?, ?)",
-                (opportunity_id, status, reason, now),
+                "INSERT INTO actions (opportunity_id, action, reason, revenue, created_at) VALUES (?, ?, ?, ?, ?)",
+                (opportunity_id, status, reason, revenue, now),
+            )
+
+    def record_collector_run(
+        self,
+        *,
+        source: str,
+        fetched: int,
+        matched: int,
+        inserted: int,
+        excluded: int,
+        duration_ms: int,
+        error: str | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO collector_runs (
+                    source, fetched, matched, inserted, excluded, duration_ms, error, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    source, fetched, matched, inserted, excluded, max(0, duration_ms), error,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
 
     def get_state(self, key: str) -> str | None:
@@ -566,9 +626,10 @@ class Database:
         output_tokens: int,
         estimated_cost_usd: float,
         status: str = "ok",
-    ) -> None:
+        opportunity_ids: list[int] | None = None,
+    ) -> int:
         with self.connect() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT INTO llm_usage (
                     purpose, model, response_id, candidate_count, input_tokens,
@@ -590,6 +651,13 @@ class Database:
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
+            usage_id = int(cur.lastrowid)
+            if opportunity_ids:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO llm_usage_items (usage_id, opportunity_id) VALUES (?, ?)",
+                    [(usage_id, opportunity_id) for opportunity_id in opportunity_ids],
+                )
+            return usage_id
 
     def llm_usage_summary(self) -> dict[str, int | float]:
         now = datetime.now(timezone.utc)
@@ -647,6 +715,165 @@ class Database:
             "classified_candidates_month": int(month["candidates"]),
             "detailed_generations_today": int(details["candidates"]),
         }
+
+    @staticmethod
+    def _attribution_key(source: str, metadata_raw: str | None) -> str:
+        try:
+            metadata = json.loads(metadata_raw or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        for key in ("query_family", "broad_query", "feed_key", "category_key"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        platform = metadata.get("platform")
+        if isinstance(platform, str) and platform.strip():
+            return platform.strip()
+        return "default"
+
+    def roi_report(
+        self,
+        *,
+        days: int = 30,
+        by_query: bool = False,
+        sources: tuple[str, ...] | None = None,
+    ) -> list[dict[str, object]]:
+        days = max(1, min(days, 3650))
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        params: list[object] = [cutoff]
+        source_clause = ""
+        if sources:
+            placeholders = ",".join("?" for _ in sources)
+            source_clause = f" AND source IN ({placeholders})"
+            params.extend(sources)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, source, metadata_json, alert_class, llm_decision, status
+                FROM opportunities
+                WHERE discovered_at >= ? {source_clause}
+                """,
+                params,
+            ).fetchall()
+            ids = [int(row["id"]) for row in rows]
+            actions: list[sqlite3.Row] = []
+            usage_rows: list[sqlite3.Row] = []
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                actions = list(
+                    conn.execute(
+                        f"SELECT opportunity_id, action, revenue FROM actions WHERE opportunity_id IN ({placeholders})",
+                        ids,
+                    ).fetchall()
+                )
+                usage_rows = list(
+                    conn.execute(
+                        f"""
+                        SELECT ui.opportunity_id, u.estimated_cost_usd, u.candidate_count
+                        FROM llm_usage_items ui
+                        JOIN llm_usage u ON u.id=ui.usage_id
+                        WHERE ui.opportunity_id IN ({placeholders}) AND u.status='ok'
+                        """,
+                        ids,
+                    ).fetchall()
+                )
+            run_params: list[object] = [cutoff]
+            run_clause = ""
+            if sources:
+                placeholders = ",".join("?" for _ in sources)
+                run_clause = f" AND source IN ({placeholders})"
+                run_params.extend(sources)
+            run_rows = conn.execute(
+                f"""
+                SELECT source, SUM(fetched) fetched, SUM(duration_ms) duration_ms, COUNT(*) runs
+                FROM collector_runs
+                WHERE created_at >= ? {run_clause}
+                GROUP BY source
+                """,
+                run_params,
+            ).fetchall()
+
+        group_by_id: dict[int, tuple[str, str]] = {}
+        groups: dict[tuple[str, str], dict[str, object]] = {}
+        for row in rows:
+            source = str(row["source"])
+            key = self._attribution_key(source, str(row["metadata_json"])) if by_query else "all"
+            group = groups.setdefault(
+                (source, key),
+                {
+                    "source": source, "key": key, "leads": 0, "p0": 0, "p1": 0,
+                    "llm_pass": 0, "llm_review": 0, "llm_reject": 0,
+                    "contacted": 0, "replied": 0, "proposal": 0, "won": 0,
+                    "lost": 0, "ignored": 0, "revenue": 0.0, "llm_cost": 0.0,
+                    "fetched": None, "runs": None, "duration_ms": None,
+                },
+            )
+            group["leads"] = int(group["leads"]) + 1
+            alert_class = str(row["alert_class"])
+            if alert_class.startswith("P0_"):
+                group["p0"] = int(group["p0"]) + 1
+            elif alert_class == "P1":
+                group["p1"] = int(group["p1"]) + 1
+            decision = str(row["llm_decision"])
+            if decision == "PASS":
+                group["llm_pass"] = int(group["llm_pass"]) + 1
+            elif decision == "REVIEW":
+                group["llm_review"] = int(group["llm_review"]) + 1
+            elif decision == "REJECT":
+                group["llm_reject"] = int(group["llm_reject"]) + 1
+            group_by_id[int(row["id"])] = (source, key)
+
+        seen_actions: dict[tuple[int, str], bool] = {}
+        max_revenue: dict[int, float] = {}
+        for row in actions:
+            opportunity_id = int(row["opportunity_id"])
+            group_key = group_by_id.get(opportunity_id)
+            if group_key is None:
+                continue
+            action = str(row["action"])
+            if action in {"contacted", "replied", "proposal", "won", "lost", "ignored"}:
+                marker = (opportunity_id, action)
+                if marker not in seen_actions:
+                    groups[group_key][action] = int(groups[group_key][action]) + 1
+                    seen_actions[marker] = True
+            if row["revenue"] is not None:
+                max_revenue[opportunity_id] = max(max_revenue.get(opportunity_id, 0.0), float(row["revenue"]))
+        for opportunity_id, revenue in max_revenue.items():
+            group_key = group_by_id.get(opportunity_id)
+            if group_key is not None:
+                groups[group_key]["revenue"] = float(groups[group_key]["revenue"]) + revenue
+
+        for row in usage_rows:
+            opportunity_id = int(row["opportunity_id"])
+            group_key = group_by_id.get(opportunity_id)
+            if group_key is None:
+                continue
+            # A batched request's cost is divided across its candidates so query/source
+            # ROI stays approximately additive instead of double counting the request.
+            candidate_count = max(1, int(row["candidate_count"]))
+            cost = float(row["estimated_cost_usd"]) / candidate_count
+            groups[group_key]["llm_cost"] = float(groups[group_key]["llm_cost"]) + cost
+
+        if not by_query:
+            run_map = {str(row["source"]): row for row in run_rows}
+            for (source, _), group in groups.items():
+                run = run_map.get(source)
+                if run is not None:
+                    group["fetched"] = int(run["fetched"] or 0)
+                    group["runs"] = int(run["runs"] or 0)
+                    group["duration_ms"] = int(run["duration_ms"] or 0)
+
+        result = list(groups.values())
+        result.sort(
+            key=lambda item: (
+                float(item["revenue"]), int(item["won"]), int(item["replied"]),
+                int(item["p0"]) + int(item["p1"]), int(item["leads"]),
+            ),
+            reverse=True,
+        )
+        return result
 
     def recent(self, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as conn:

@@ -138,6 +138,10 @@ class TelegramClient:
                     {"text": "Ignore", "callback_data": f"status:{opportunity_id}:ignored"},
                     {"text": "Contacted", "callback_data": f"status:{opportunity_id}:contacted"},
                 ],
+                [
+                    {"text": "Replied", "callback_data": f"status:{opportunity_id}:replied"},
+                    {"text": "Won", "callback_data": f"status:{opportunity_id}:won"},
+                ],
             ]
         }
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -181,7 +185,7 @@ class TelegramClient:
                     continue
                 try:
                     prefix, opp_id_raw, status = data.split(":", 2)
-                    if prefix != "status" or status not in {"ignored", "contacted"}:
+                    if prefix != "status" or status not in {"ignored", "contacted", "replied", "won"}:
                         continue
                     self.db.set_status(int(opp_id_raw), status, reason="telegram_callback")
                     await self._request(

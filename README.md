@@ -1,3 +1,63 @@
+# Lead Radar v2.3 Phase 6B - Config-driven RSS/Atom discovery
+
+Phase 6B adds a generic public RSS/Atom collector so new feed sources can be added in YAML without writing a new Python adapter. It keeps the same deterministic matcher, commercial scoring, SQLite dedupe, LLM precision gate and Telegram controls.
+
+## Phase 6B adds
+
+- RSS 2.0, Atom 1.0 and common RDF/RSS item parsing using the Python standard library;
+- `config/feeds.yaml` for feed definitions;
+- per-feed lookback, item caps, category kind and source labels;
+- ETag / Last-Modified conditional requests;
+- per-feed publication cursors with a small overlap window;
+- per-feed minimum polling intervals so slow feeds are not hammered by the 3-minute radar cycle;
+- bundled public Jobicy freelance/contract engineering feeds as the first marketplace RSS source;
+- a disabled Google Alerts example that can be enabled locally by pasting a personal RSS URL;
+- RSS marketplace items reuse the same buyer/seller/recruiter and LLM gates as existing communities.
+
+No new API key is required for the bundled public feeds. Jobicy feeds are hard-limited in `feeds.yaml` to one request per feed per hour.
+
+## New environment variables
+
+```env
+RSS_ENABLED=true
+RSS_FEEDS_CONFIG=./config/feeds.yaml
+RSS_CONCURRENCY=4
+```
+
+## Add another feed
+
+Edit `config/feeds.yaml`:
+
+```yaml
+feeds:
+  - key: my_feed
+    source: my_source
+    name: My buyer-intent feed
+    url: "https://example.com/feed.xml"
+    enabled: true
+    category_kind: business_pain
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 15
+```
+
+Use `category_kind: marketplace` only for feeds where posts are actually hiring/contract/project listings.
+
+## Verify Phase 6B
+
+```powershell
+ruff check .
+mypy lead_radar
+python -m pytest -q
+python -m compileall -q lead_radar
+git diff --check
+python -m lead_radar once
+```
+
+A normal cycle now includes a line such as `rss fetched N item(s)`.
+
+---
+
 # Lead Radar v1.7 Phase 2 - Make + n8n Direct Buyer Sources
 
 Phase 2 keeps the existing private/local Lead Radar and adds direct public Discourse adapters for the two most commercially useful automation communities in the current plan. No account or API key is required for these adapters.
@@ -405,3 +465,38 @@ Phase 6A adds two no-credential discovery sensors while keeping the existing det
 - `bluesky`: public `app.bsky.feed.searchPosts` queries against the Bluesky AppView. Query families rotate across cycles and only fresh local-lookback results are emitted. No Bluesky account or token is required.
 
 HubSpot public-page polling is disabled by default after repeatable HTTP 403 responses from the local client. It remains available behind `HUBSPOT_ENABLED=true` for future experiments, but it no longer wastes time or logs warnings in the normal loop.
+
+## Phase 7A: feedback and ROI tracking
+
+Lead Radar now stores collector run metrics and can track the sales outcome of each opportunity.
+This turns the system from a one-way detector into a measurable acquisition loop.
+
+Record actions from the CLI:
+
+```powershell
+python -m lead_radar lead-action --id 2127 --action contacted --note "public reply"
+python -m lead_radar lead-action --id 2127 --action replied
+python -m lead_radar lead-action --id 2127 --action proposal
+python -m lead_radar lead-action --id 2127 --action won --revenue 250
+```
+
+Supported stages are `new`, `contacted`, `replied`, `proposal`, `won`, `lost`, and `ignored`.
+Telegram alerts also expose `Replied` and `Won` buttons in addition to `Ignore` and `Contacted`.
+
+Source-level ROI for the last 30 days:
+
+```powershell
+python -m lead_radar roi --days 30
+```
+
+Query/feed/category attribution:
+
+```powershell
+python -m lead_radar roi --days 30 --by query
+python -m lead_radar roi --days 30 --by query --source bluesky
+```
+
+The report shows lead volume, P0/P1 counts, contacted/replied/proposal/won/lost/ignored stages,
+recorded revenue, collector fetched volume (source view), and attributable LLM cost for requests
+made after this phase was installed. Query attribution uses `query_family`, `broad_query`,
+`feed_key`, or `category_key` from opportunity metadata.

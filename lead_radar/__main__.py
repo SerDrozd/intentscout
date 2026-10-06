@@ -29,6 +29,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("llm-stats", help="Show LLM token/cost budget usage")
     prepare = sub.add_parser("prepare", help="Generate or show an action brief and outreach draft for one lead")
     prepare.add_argument("--id", type=int, required=True, dest="opportunity_id")
+    action = sub.add_parser("lead-action", help="Record outreach/reply/proposal/win/loss feedback for one lead")
+    action.add_argument("--id", type=int, required=True, dest="opportunity_id")
+    action.add_argument(
+        "--action",
+        required=True,
+        choices=("contacted", "replied", "proposal", "won", "lost", "ignored", "new"),
+    )
+    action.add_argument("--revenue", type=float, default=None, help="Revenue in USD; normally used with --action won")
+    action.add_argument("--note", default=None, help="Optional short note stored in the action history")
+    roi = sub.add_parser("roi", help="Show source/query funnel and revenue performance")
+    roi.add_argument("--days", type=int, default=30)
+    roi.add_argument("--by", choices=("source", "query"), default="source")
+    roi.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -75,6 +88,38 @@ async def async_main(args: argparse.Namespace) -> int:
         return 0
     if args.command == "stats":
         print(app.db.stats())
+        return 0
+    if args.command == "lead-action":
+        try:
+            app.db.set_status(
+                args.opportunity_id,
+                args.action,
+                reason=args.note or "cli",
+                revenue=args.revenue,
+            )
+        except ValueError as exc:
+            print(str(exc))
+            return 2
+        suffix = f" revenue=${args.revenue:.2f}" if args.revenue is not None else ""
+        print(f"#{args.opportunity_id} -> {args.action}{suffix}")
+        return 0
+    if args.command == "roi":
+        sources = tuple(args.sources) if args.sources else None
+        rows = app.db.roi_report(days=args.days, by_query=args.by == "query", sources=sources)
+        if not rows:
+            print("No ROI data in the selected window.")
+            return 0
+        print(f"ROI window: {args.days}d | by={args.by}")
+        for row in rows:
+            label = str(row["source"]) if args.by == "source" else f"{row['source']}:{row['key']}"
+            fetched = row.get("fetched")
+            fetch_part = f" fetched={fetched}" if fetched is not None else ""
+            print(
+                f"{label}{fetch_part} leads={row['leads']} p0={row['p0']} p1={row['p1']} "
+                f"contacted={row['contacted']} replied={row['replied']} proposal={row['proposal']} "
+                f"won={row['won']} lost={row['lost']} ignored={row['ignored']} "
+                f"revenue=${float(row['revenue']):.2f} llm=${float(row['llm_cost']):.6f}"
+            )
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())
