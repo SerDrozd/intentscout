@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .app import RadarApp
 from .config import load_settings
+from .llm import LLMAPIError, LLMBudgetExceeded
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     shortlist = sub.add_parser("shortlist", help="Show highest-priority actionable P0/P1 opportunities")
     shortlist.add_argument("--limit", type=int, default=20)
     shortlist.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
+    llm_classify = sub.add_parser("llm-classify", help="Classify current P0/P1 shortlist with the cheap LLM gate")
+    llm_classify.add_argument("--limit", type=int, default=20)
+    llm_classify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
+    llm_classify.add_argument("--force", action="store_true", help="Reclassify rows that already have an LLM decision")
+    sub.add_parser("llm-stats", help="Show LLM token/cost budget usage")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -56,13 +62,49 @@ async def async_main(args: argparse.Namespace) -> int:
 
     if args.command == "once":
         stats = await app.run_cycle()
-        print(f"fetched={stats.fetched} matched={stats.matched} inserted={stats.inserted} alerted={stats.alerted} excluded={stats.excluded}")
+        print(
+            f"fetched={stats.fetched} matched={stats.matched} inserted={stats.inserted} "
+            f"alerted={stats.alerted} excluded={stats.excluded} "
+            f"llm_classified={stats.llm_classified} llm_rejected={stats.llm_rejected}"
+        )
         return 0
     if args.command == "run":
         await app.run_forever()
         return 0
     if args.command == "stats":
         print(app.db.stats())
+        return 0
+    if args.command == "llm-stats":
+        usage: dict[str, object] = dict(app.db.llm_usage_summary())
+        usage["daily_budget_usd"] = settings.daily_llm_budget_usd
+        usage["monthly_budget_usd"] = settings.monthly_llm_budget_usd
+        usage["model"] = settings.llm_model
+        print(usage)
+        return 0
+    if args.command == "llm-classify":
+        if not settings.llm_enabled:
+            print("LLM classification is disabled by LLM_ENABLED=false.")
+            return 2
+        if not settings.openai_api_key:
+            print("OPENAI_API_KEY is not configured in .env; no API request was made.")
+            return 2
+        sources = tuple(args.sources) if args.sources else None
+        try:
+            results = await app.classify_shortlist(args.limit, sources, force=args.force)
+        except (LLMAPIError, LLMBudgetExceeded) as exc:
+            print(f"LLM classification stopped safely: {exc}")
+            return 2
+        if not results:
+            print("No unclassified P0/P1 candidates in the current shortlist.")
+        for item in results:
+            reason = item.rejection_reason if item.decision.value == "REJECT" else item.problem_summary
+            print(
+                f"#{item.opportunity_id} {item.decision.value} confidence={item.confidence} "
+                f"author={item.author_type.value} intent={item.commercial_intent.value} "
+                f"contact={item.should_contact} fit={item.technical_fit} payment={item.payment_intent}\n"
+                f"  {reason}"
+            )
+        print(app.db.llm_usage_summary())
         return 0
     if args.command == "shortlist":
         sources = tuple(args.sources) if args.sources else None
@@ -74,7 +116,8 @@ async def async_main(args: argparse.Namespace) -> int:
             print(
                 f"#{row['id']} [{row['alert_class']}] priority={row['priority_score']} "
                 f"cash={row['cash_score']} value={row['value_score']} rel={row['relationship_score']} "
-                f"fresh={row['freshness_score']} comp={row['competition_score']} age={_age_label(row['created_at'])}\n"
+                f"fresh={row['freshness_score']} comp={row['competition_score']} age={_age_label(row['created_at'])} "
+                f"llm={row['llm_decision']} conf={row['llm_confidence'] if row['llm_confidence'] is not None else '-'}\n"
                 f"  {row['author_type']} / {row['commercial_intent']} / {row['opportunity_class']} "
                 f"[{row['source']}] {row['title']}\n"
                 f"  {row['url']}"

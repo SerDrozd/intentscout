@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -10,8 +11,9 @@ from .collectors import GitHubCollector, HackerNewsCollector, MakeCommunityColle
 from .commercial import assess_commercial
 from .config import Settings, load_keyword_config
 from .database import Database
+from .llm import CLASSIFIER_SCHEMA_VERSION, LLMAPIError, LLMBudgetExceeded, OpenAILeadClassifier
 from .matcher import Matcher
-from .models import Opportunity, ScoredOpportunity
+from .models import LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
 from .scoring import score
 from .telegram import TelegramAPIError, TelegramClient
 
@@ -29,6 +31,8 @@ class CycleStats:
     alert_suppressed: int = 0
     excluded: int = 0
     intent_filtered: int = 0
+    llm_classified: int = 0
+    llm_rejected: int = 0
 
 
 class RadarApp:
@@ -46,6 +50,16 @@ class RadarApp:
             coverage["pair_variant_equivalents"],
         )
         self.telegram = TelegramClient(settings.telegram_bot_token, settings.telegram_chat_id, self.db)
+        self.llm = OpenAILeadClassifier(
+            api_key=settings.openai_api_key if settings.llm_enabled else None,
+            model=settings.llm_model,
+            max_post_chars=settings.max_post_chars,
+            max_output_tokens=settings.llm_max_output_tokens,
+            input_price_per_mtok=settings.llm_input_price_per_mtok,
+            cached_input_price_per_mtok=settings.llm_cached_input_price_per_mtok,
+            cache_write_price_per_mtok=settings.llm_cache_write_price_per_mtok,
+            output_price_per_mtok=settings.llm_output_price_per_mtok,
+        )
 
     def collectors(self):
         if self.settings.hn_enabled:
@@ -114,6 +128,152 @@ class RadarApp:
             elif assessment.alert_class.value == "REJECT":
                 counts["reject"] += 1
         return counts
+
+    @staticmethod
+    def _row_to_opportunity(row: sqlite3.Row) -> Opportunity:
+        metadata_raw = row["metadata_json"]
+        try:
+            metadata = json.loads(str(metadata_raw)) if metadata_raw else {}
+        except json.JSONDecodeError:
+            metadata = {}
+        created_at = datetime.fromisoformat(str(row["created_at"]))
+        return Opportunity(
+            source=str(row["source"]),
+            external_id=str(row["external_id"]),
+            url=str(row["url"]),
+            title=str(row["title"]),
+            body=str(row["body"]),
+            author=None if row["author"] is None else str(row["author"]),
+            created_at=created_at,
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+
+    def _budget_capacity(self) -> tuple[int, float, float]:
+        usage = self.db.llm_usage_summary()
+        hour_remaining = max(
+            0,
+            self.settings.max_llm_candidates_per_hour - int(usage["classified_candidates_hour"]),
+        )
+        day_remaining = max(
+            0,
+            self.settings.max_llm_candidates_per_day - int(usage["classified_candidates_today"]),
+        )
+        candidate_remaining = min(hour_remaining, day_remaining)
+        daily_remaining = max(
+            0.0,
+            self.settings.daily_llm_budget_usd - float(usage["estimated_cost_today"]),
+        )
+        monthly_remaining = max(
+            0.0,
+            self.settings.monthly_llm_budget_usd - float(usage["estimated_cost_month"]),
+        )
+        return candidate_remaining, daily_remaining, monthly_remaining
+
+    async def _classify_opportunities(
+        self,
+        opportunities: list[tuple[int, Opportunity]],
+        *,
+        purpose: str,
+    ) -> list[LLMClassification]:
+        if not opportunities:
+            return []
+        if not self.settings.llm_enabled or not self.llm.enabled:
+            return []
+
+        results: list[LLMClassification] = []
+        offset = 0
+        while offset < len(opportunities):
+            remaining, daily_usd, monthly_usd = self._budget_capacity()
+            if remaining <= 0:
+                if results:
+                    break
+                raise LLMBudgetExceeded("LLM candidate budget reached")
+            batch_size = min(self.settings.llm_batch_size, remaining, len(opportunities) - offset)
+            batch = opportunities[offset : offset + batch_size]
+            estimated = self.llm.estimate_request_cost(batch)
+            if estimated > daily_usd or estimated > monthly_usd:
+                if results:
+                    break
+                raise LLMBudgetExceeded("LLM dollar budget reached")
+            classifications, usage = await self.llm.classify(batch)
+            self.db.record_llm_usage(
+                purpose=purpose,
+                model=self.settings.llm_model,
+                response_id=usage.response_id,
+                candidate_count=len(batch),
+                input_tokens=usage.input_tokens,
+                cached_input_tokens=usage.cached_input_tokens,
+                cache_write_tokens=usage.cache_write_tokens,
+                output_tokens=usage.output_tokens,
+                estimated_cost_usd=usage.estimated_cost_usd,
+            )
+            for classification in classifications:
+                self.db.save_llm_classification(
+                    classification,
+                    model=self.settings.llm_model,
+                    schema_version=CLASSIFIER_SCHEMA_VERSION,
+                )
+            results.extend(classifications)
+            offset += batch_size
+        return results
+
+    async def classify_shortlist(
+        self,
+        limit: int = 20,
+        sources: tuple[str, ...] | None = None,
+        *,
+        force: bool = False,
+    ) -> list[LLMClassification]:
+        rows = self.db.llm_candidate_rows(limit, sources, force=force)
+        opportunities = [(int(row["id"]), self._row_to_opportunity(row)) for row in rows]
+        return await self._classify_opportunities(opportunities, purpose="shortlist")
+
+    async def _auto_classify_review_candidates(self, stats: CycleStats) -> None:
+        if not self.settings.llm_enabled or not self.llm.enabled:
+            return
+        rows = self.db.llm_candidate_rows(self.settings.max_llm_candidates_per_hour)
+        if not rows:
+            return
+        opportunities = [(int(row["id"]), self._row_to_opportunity(row)) for row in rows]
+        try:
+            classifications = await self._classify_opportunities(opportunities, purpose="auto_shortlist")
+            stats.llm_classified += len(classifications)
+        except LLMBudgetExceeded as exc:
+            log.info("Automatic LLM shortlist classification skipped: %s", exc)
+        except LLMAPIError as exc:
+            log.warning("Automatic LLM shortlist classification failed safely: %s", exc)
+
+    async def _llm_filter_pending(
+        self,
+        pending_alerts: list[tuple[int, int, ScoredOpportunity]],
+        stats: CycleStats,
+    ) -> list[tuple[int, int, ScoredOpportunity]]:
+        if not pending_alerts or not self.settings.llm_enabled or not self.llm.enabled:
+            return pending_alerts
+
+        decisions = self.db.llm_decisions([item[1] for item in pending_alerts])
+        to_classify: list[tuple[int, Opportunity]] = []
+        for _, opportunity_id, scored in pending_alerts:
+            if decisions.get(opportunity_id, "NOT_RUN") == LLMDecision.NOT_RUN.value:
+                to_classify.append((opportunity_id, scored.opportunity))
+        if to_classify:
+            try:
+                classifications = await self._classify_opportunities(to_classify, purpose="live_p0_gate")
+                stats.llm_classified += len(classifications)
+                decisions.update({item.opportunity_id: item.decision.value for item in classifications})
+            except LLMBudgetExceeded as exc:
+                log.info("LLM gate skipped: %s", exc)
+            except LLMAPIError as exc:
+                log.warning("LLM gate failed safely: %s", exc)
+
+        kept: list[tuple[int, int, ScoredOpportunity]] = []
+        for item in pending_alerts:
+            opportunity_id = item[1]
+            if decisions.get(opportunity_id) == LLMDecision.REJECT.value:
+                stats.llm_rejected += 1
+                continue
+            kept.append(item)
+        return kept
 
     async def process(
         self,
@@ -238,6 +398,8 @@ class RadarApp:
             except Exception:
                 log.exception("Collector %s failed", getattr(collector, "name", type(collector).__name__))
 
+        await self._auto_classify_review_candidates(stats)
+        pending_alerts = await self._llm_filter_pending(pending_alerts, stats)
         await self._send_pending_alerts(pending_alerts, stats)
         return stats
 
@@ -245,7 +407,7 @@ class RadarApp:
         while True:
             stats = await self.run_cycle()
             log.info(
-                "Cycle done: fetched=%s matched=%s inserted=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s",
+                "Cycle done: fetched=%s matched=%s inserted=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s llm_classified=%s llm_rejected=%s",
                 stats.fetched,
                 stats.matched,
                 stats.inserted,
@@ -254,5 +416,7 @@ class RadarApp:
                 stats.alerted,
                 stats.alert_suppressed,
                 stats.excluded,
+                stats.llm_classified,
+                stats.llm_rejected,
             )
             await asyncio.sleep(self.settings.poll_interval_seconds)

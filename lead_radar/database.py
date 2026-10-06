@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .models import CommercialAssessment, ScoredOpportunity
+from .models import CommercialAssessment, LLMClassification, ScoredOpportunity
 
 
 SCHEMA = """
@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS opportunities (
     freshness_score INTEGER NOT NULL DEFAULT 0,
     competition_score INTEGER NOT NULL DEFAULT 65,
     commercial_features_json TEXT NOT NULL DEFAULT '{}',
+    llm_decision TEXT NOT NULL DEFAULT 'NOT_RUN',
+    llm_confidence INTEGER,
+    llm_classified_at TEXT,
     UNIQUE(source, external_id)
 );
 
@@ -73,6 +76,45 @@ CREATE TABLE IF NOT EXISTS actions (
     revenue REAL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS llm_classifications (
+    opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id) ON DELETE CASCADE,
+    model TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    is_opportunity INTEGER NOT NULL,
+    author_type TEXT NOT NULL,
+    commercial_intent TEXT NOT NULL,
+    payment_intent INTEGER NOT NULL,
+    business_impact INTEGER NOT NULL,
+    urgency INTEGER NOT NULL,
+    technical_fit INTEGER NOT NULL,
+    decision_maker_probability INTEGER NOT NULL,
+    bounded_task INTEGER NOT NULL,
+    should_contact INTEGER NOT NULL,
+    confidence INTEGER NOT NULL,
+    problem_summary TEXT NOT NULL,
+    rejection_reason TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purpose TEXT NOT NULL,
+    model TEXT NOT NULL,
+    response_id TEXT,
+    candidate_count INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    cached_input_tokens INTEGER NOT NULL,
+    cache_write_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    estimated_cost_usd REAL NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at DESC);
 """
 
 
@@ -87,6 +129,9 @@ COMMERCIAL_COLUMNS: dict[str, str] = {
     "freshness_score": "INTEGER NOT NULL DEFAULT 0",
     "competition_score": "INTEGER NOT NULL DEFAULT 65",
     "commercial_features_json": "TEXT NOT NULL DEFAULT '{}'",
+    "llm_decision": "TEXT NOT NULL DEFAULT 'NOT_RUN'",
+    "llm_confidence": "INTEGER",
+    "llm_classified_at": "TEXT",
 }
 
 
@@ -127,6 +172,7 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_opportunities_relationship ON opportunities(relationship_score DESC)"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_alert_class ON opportunities(alert_class)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_llm_decision ON opportunities(llm_decision)")
 
     @staticmethod
     def _content_hash(source: str, title: str, body: str) -> str:
@@ -282,6 +328,239 @@ class Database:
                     opportunity_id,
                 ),
             )
+            conn.execute(
+                "UPDATE opportunities SET llm_decision='NOT_RUN', llm_confidence=NULL, llm_classified_at=NULL WHERE id=?",
+                (opportunity_id,),
+            )
+            conn.execute("DELETE FROM llm_classifications WHERE opportunity_id=?", (opportunity_id,))
+
+    def llm_candidate_rows(
+        self,
+        limit: int = 20,
+        sources: tuple[str, ...] | None = None,
+        *,
+        force: bool = False,
+    ) -> list[sqlite3.Row]:
+        limit = max(1, min(limit, 200))
+        params: list[str | int] = []
+        source_clause = ""
+        if sources:
+            placeholders = ",".join("?" for _ in sources)
+            source_clause = f" AND source IN ({placeholders})"
+            params.extend(sources)
+        llm_clause = "" if force else " AND llm_decision='NOT_RUN'"
+        params.append(limit)
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    f"""
+                    SELECT id, source, external_id, url, title, body, author, created_at,
+                           metadata_json, author_type, commercial_intent, opportunity_class,
+                           alert_class, cash_score, value_score, relationship_score,
+                           freshness_score, competition_score, llm_decision, llm_confidence
+                    FROM opportunities
+                    WHERE status='new'
+                      AND (alert_class LIKE 'P0_%' OR alert_class='P1')
+                      {source_clause}
+                      {llm_clause}
+                    ORDER BY
+                        CASE WHEN alert_class LIKE 'P0_%' THEN 0 ELSE 1 END,
+                        MAX(cash_score, value_score, relationship_score) DESC,
+                        freshness_score DESC,
+                        created_at DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+            )
+
+    def llm_decisions(self, opportunity_ids: list[int]) -> dict[int, str]:
+        if not opportunity_ids:
+            return {}
+        placeholders = ",".join("?" for _ in opportunity_ids)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, llm_decision FROM opportunities WHERE id IN ({placeholders})",
+                opportunity_ids,
+            ).fetchall()
+        return {int(row["id"]): str(row["llm_decision"]) for row in rows}
+
+    def save_llm_classification(
+        self,
+        classification: LLMClassification,
+        *,
+        model: str,
+        schema_version: str,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "opportunity_id": classification.opportunity_id,
+            "is_opportunity": classification.is_opportunity,
+            "author_type": classification.author_type.value,
+            "commercial_intent": classification.commercial_intent.value,
+            "payment_intent": classification.payment_intent,
+            "business_impact": classification.business_impact,
+            "urgency": classification.urgency,
+            "technical_fit": classification.technical_fit,
+            "decision_maker_probability": classification.decision_maker_probability,
+            "bounded_task": classification.bounded_task,
+            "should_contact": classification.should_contact,
+            "confidence": classification.confidence,
+            "problem_summary": classification.problem_summary,
+            "rejection_reason": classification.rejection_reason,
+            "decision": classification.decision.value,
+        }
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_classifications (
+                    opportunity_id, model, schema_version, decision, is_opportunity,
+                    author_type, commercial_intent, payment_intent, business_impact,
+                    urgency, technical_fit, decision_maker_probability, bounded_task,
+                    should_contact, confidence, problem_summary, rejection_reason,
+                    raw_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(opportunity_id) DO UPDATE SET
+                    model=excluded.model,
+                    schema_version=excluded.schema_version,
+                    decision=excluded.decision,
+                    is_opportunity=excluded.is_opportunity,
+                    author_type=excluded.author_type,
+                    commercial_intent=excluded.commercial_intent,
+                    payment_intent=excluded.payment_intent,
+                    business_impact=excluded.business_impact,
+                    urgency=excluded.urgency,
+                    technical_fit=excluded.technical_fit,
+                    decision_maker_probability=excluded.decision_maker_probability,
+                    bounded_task=excluded.bounded_task,
+                    should_contact=excluded.should_contact,
+                    confidence=excluded.confidence,
+                    problem_summary=excluded.problem_summary,
+                    rejection_reason=excluded.rejection_reason,
+                    raw_json=excluded.raw_json,
+                    created_at=excluded.created_at
+                """,
+                (
+                    classification.opportunity_id,
+                    model,
+                    schema_version,
+                    classification.decision.value,
+                    int(classification.is_opportunity),
+                    classification.author_type.value,
+                    classification.commercial_intent.value,
+                    classification.payment_intent,
+                    classification.business_impact,
+                    classification.urgency,
+                    classification.technical_fit,
+                    classification.decision_maker_probability,
+                    int(classification.bounded_task),
+                    int(classification.should_contact),
+                    classification.confidence,
+                    classification.problem_summary,
+                    classification.rejection_reason,
+                    json.dumps(payload, ensure_ascii=False),
+                    now,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE opportunities
+                SET llm_decision=?, llm_confidence=?, llm_classified_at=?
+                WHERE id=?
+                """,
+                (
+                    classification.decision.value,
+                    classification.confidence,
+                    now,
+                    classification.opportunity_id,
+                ),
+            )
+
+    def record_llm_usage(
+        self,
+        *,
+        purpose: str,
+        model: str,
+        response_id: str | None,
+        candidate_count: int,
+        input_tokens: int,
+        cached_input_tokens: int,
+        cache_write_tokens: int,
+        output_tokens: int,
+        estimated_cost_usd: float,
+        status: str = "ok",
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_usage (
+                    purpose, model, response_id, candidate_count, input_tokens,
+                    cached_input_tokens, cache_write_tokens, output_tokens,
+                    estimated_cost_usd, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    purpose,
+                    model,
+                    response_id,
+                    candidate_count,
+                    input_tokens,
+                    cached_input_tokens,
+                    cache_write_tokens,
+                    output_tokens,
+                    estimated_cost_usd,
+                    status,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def llm_usage_summary(self) -> dict[str, int | float]:
+        now = datetime.now(timezone.utc)
+        day_prefix = now.date().isoformat()
+        month_prefix = now.strftime("%Y-%m")
+        hour_cutoff = now.replace(minute=0, second=0, microsecond=0).isoformat()
+        with self.connect() as conn:
+            today = conn.execute(
+                """
+                SELECT COALESCE(SUM(input_tokens), 0) input_tokens,
+                       COALESCE(SUM(output_tokens), 0) output_tokens,
+                       COALESCE(SUM(estimated_cost_usd), 0.0) cost,
+                       COALESCE(SUM(candidate_count), 0) candidates,
+                       COUNT(*) requests
+                FROM llm_usage
+                WHERE created_at LIKE ? AND status='ok'
+                """,
+                (f"{day_prefix}%",),
+            ).fetchone()
+            month = conn.execute(
+                """
+                SELECT COALESCE(SUM(estimated_cost_usd), 0.0) cost,
+                       COALESCE(SUM(candidate_count), 0) candidates,
+                       COUNT(*) requests
+                FROM llm_usage
+                WHERE created_at LIKE ? AND status='ok'
+                """,
+                (f"{month_prefix}%",),
+            ).fetchone()
+            hour = conn.execute(
+                """
+                SELECT COALESCE(SUM(candidate_count), 0) candidates
+                FROM llm_usage
+                WHERE created_at >= ? AND status='ok'
+                """,
+                (hour_cutoff,),
+            ).fetchone()
+        return {
+            "input_tokens_today": int(today["input_tokens"]),
+            "output_tokens_today": int(today["output_tokens"]),
+            "llm_requests_today": int(today["requests"]),
+            "classified_candidates_today": int(today["candidates"]),
+            "classified_candidates_hour": int(hour["candidates"]),
+            "estimated_cost_today": float(today["cost"]),
+            "estimated_cost_month": float(month["cost"]),
+            "llm_requests_month": int(month["requests"]),
+            "classified_candidates_month": int(month["candidates"]),
+        }
 
     def recent(self, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -323,11 +602,12 @@ class Database:
                     SELECT id, source, status, created_at, discovered_at, title, url,
                            author_type, commercial_intent, opportunity_class, alert_class,
                            cash_score, value_score, relationship_score, freshness_score,
-                           competition_score,
+                           competition_score, llm_decision, llm_confidence,
                            MAX(cash_score, value_score, relationship_score) AS priority_score
                     FROM opportunities
                     WHERE status='new'
                       AND (alert_class LIKE 'P0_%' OR alert_class='P1')
+                      AND llm_decision <> 'REJECT'
                       {source_clause}
                     ORDER BY
                         CASE WHEN alert_class LIKE 'P0_%' THEN 0 ELSE 1 END,
@@ -345,9 +625,14 @@ class Database:
         with self.connect() as conn:
             total = conn.execute("SELECT COUNT(*) c FROM opportunities").fetchone()["c"]
             p0 = conn.execute(
-                "SELECT COUNT(*) c FROM opportunities WHERE alert_class LIKE 'P0_%'"
+                "SELECT COUNT(*) c FROM opportunities WHERE alert_class LIKE 'P0_%' AND llm_decision <> 'REJECT'"
             ).fetchone()["c"]
-            p1 = conn.execute("SELECT COUNT(*) c FROM opportunities WHERE alert_class='P1'").fetchone()["c"]
+            p1 = conn.execute(
+                "SELECT COUNT(*) c FROM opportunities WHERE alert_class='P1' AND llm_decision <> 'REJECT'"
+            ).fetchone()["c"]
+            llm_rejected = conn.execute(
+                "SELECT COUNT(*) c FROM opportunities WHERE llm_decision='REJECT'"
+            ).fetchone()["c"]
             contacted = conn.execute(
                 "SELECT COUNT(*) c FROM opportunities WHERE status='contacted'"
             ).fetchone()["c"]
@@ -356,4 +641,5 @@ class Database:
             "p0": int(p0),
             "p1": int(p1),
             "contacted": int(contacted),
+            "llm_rejected": int(llm_rejected),
         }

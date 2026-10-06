@@ -27,6 +27,15 @@ class CommercialIntent(StrEnum):
     EXPLICIT = "EXPLICIT"
 
 
+
+
+class LLMDecision(StrEnum):
+    NOT_RUN = "NOT_RUN"
+    PASS = "PASS"
+    REVIEW = "REVIEW"
+    REJECT = "REJECT"
+
+
 class OpportunityClass(StrEnum):
     CASH_NOW = "CASH_NOW"
     HIGH_VALUE = "HIGH_VALUE"
@@ -114,3 +123,22 @@ class ScoredOpportunity:
     breakdown: dict[str, int]
     assessment: CommercialAssessment | None = None
     discovered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass(slots=True)
+class LLMClassification:
+    opportunity_id: int
+    is_opportunity: bool
+    author_type: AuthorType
+    commercial_intent: CommercialIntent
+    payment_intent: int
+    business_impact: int
+    urgency: int
+    technical_fit: int
+    decision_maker_probability: int
+    bounded_task: bool
+    should_contact: bool
+    confidence: int
+    problem_summary: str
+    rejection_reason: str
+    decision: LLMDecision = LLMDecision.REVIEW

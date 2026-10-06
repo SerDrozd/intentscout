@@ -40,6 +40,20 @@ class Settings:
     discourse_concurrency: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
+    llm_enabled: bool = True
+    openai_api_key: str | None = None
+    llm_model: str = "gpt-6-luna"
+    daily_llm_budget_usd: float = 0.03
+    monthly_llm_budget_usd: float = 0.75
+    max_llm_candidates_per_hour: int = 10
+    max_llm_candidates_per_day: int = 50
+    llm_batch_size: int = 5
+    max_post_chars: int = 5000
+    llm_max_output_tokens: int = 1200
+    llm_input_price_per_mtok: float = 0.10
+    llm_cached_input_price_per_mtok: float = 0.01
+    llm_cache_write_price_per_mtok: float = 0.125
+    llm_output_price_per_mtok: float = 0.50
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -87,6 +101,20 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         discourse_concurrency=int(os.getenv("DISCOURSE_CONCURRENCY", "6")),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
+        llm_enabled=_bool("LLM_ENABLED", True),
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        llm_model=os.getenv("LLM_MODEL", "gpt-6-luna"),
+        daily_llm_budget_usd=max(0.0, float(os.getenv("DAILY_LLM_BUDGET_USD", "0.03"))),
+        monthly_llm_budget_usd=max(0.0, float(os.getenv("MONTHLY_LLM_BUDGET_USD", "0.75"))),
+        max_llm_candidates_per_hour=max(1, int(os.getenv("MAX_LLM_CANDIDATES_PER_HOUR", "10"))),
+        max_llm_candidates_per_day=max(1, int(os.getenv("MAX_LLM_CANDIDATES_PER_DAY", "50"))),
+        llm_batch_size=max(1, min(10, int(os.getenv("LLM_BATCH_SIZE", "5")))),
+        max_post_chars=max(500, int(os.getenv("MAX_POST_CHARS", "5000"))),
+        llm_max_output_tokens=max(200, int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1200"))),
+        llm_input_price_per_mtok=max(0.0, float(os.getenv("LLM_INPUT_PRICE_PER_MTOK", "0.10"))),
+        llm_cached_input_price_per_mtok=max(0.0, float(os.getenv("LLM_CACHED_INPUT_PRICE_PER_MTOK", "0.01"))),
+        llm_cache_write_price_per_mtok=max(0.0, float(os.getenv("LLM_CACHE_WRITE_PRICE_PER_MTOK", "0.125"))),
+        llm_output_price_per_mtok=max(0.0, float(os.getenv("LLM_OUTPUT_PRICE_PER_MTOK", "0.50"))),
     )
 
 
