@@ -355,3 +355,44 @@ Drafts are validated deterministically. Em/en dashes are removed, and generic ph
 For a live P0 lead that survives the deterministic and LLM precision gates, Lead Radar tries to create the same brief before sending Telegram. If the OpenAI budget is exhausted or the API fails, ingestion continues and Telegram falls back to a shorter deterministic card rather than dropping the lead.
 
 `python -m lead_radar llm-stats` now also includes `detailed_generations_today`.
+
+
+## Phase 5: additional public buyer/pain communities
+
+Enabled by default with no new credentials:
+
+- `hubspot`: HubSpot Community -> Develop, Build & Integrate -> APIs & Integrations.
+- `shopify`: Shopify Developer Community -> Webhooks & Events, Fulfillment & Inventory, Products & Orders APIs, Authentication & Access.
+- `bubble`: Bubble Forum -> Jobs / Freelance.
+
+All three reuse the existing public Discourse JSON collector and per-topic reply cursors. Non-author replies are stored for competition/context but cannot become interruptive buyer events. Bubble Jobs/Freelance is treated as a mixed marketplace: seller/self-promo and structured employment posts remain deterministic rejects. HubSpot/Shopify are business-pain sources and require buyer/business context before P0/P1.
+
+Airtable and Zapier are intentionally not scraped in this phase. Their current community platforms do not expose the same stable public Discourse JSON contract; they should be added through the later generic web/RSS discovery adapter rather than a brittle one-off scraper.
+
+
+## Phase 5A repair notes
+
+- HubSpot `APIs & Integrations` uses the still-working canonical Discourse JSON path `c/hubspot-developer-support/apis-integrations/80.json`. The newer browser-facing category slug does not expose the same JSON endpoint reliably.
+- Bubble `Jobs / Freelance` is low-volume, so its bootstrap lookback defaults to 168 hours (7 days). Normal freshness scoring still downranks older posts; replies after bootstrap remain event-driven by the per-topic cursor.
+
+## Phase 5B: safe public-page community adapter
+
+Some commercially useful communities do not expose a stable public JSON/RSS API. Phase 5B adds a conservative HTML adapter that uses ordinary public GET requests only: no login, cookies, CAPTCHA bypass, browser automation, or private endpoints.
+
+Enabled sources:
+
+- **HubSpot APIs & Integrations** through its public category/topic HTML because HubSpot's JSON endpoint returned HTTP 403 from the local collector;
+- **Airtable Jobs Board** as a low-frequency buyer marketplace (14-day bootstrap window);
+- **Zapier Code & Webhooks / Troubleshooting / How Do I** as business-pain sources (7-day bootstrap window).
+
+The adapter discovers same-domain topic links, fetches only a bounded number of pages, extracts structured JSON-LD/meta/article content where available, requires a real publication timestamp, and stores only topic starters. Fresh reply monitoring remains on the dedicated Discourse adapters for Make/n8n/Shopify/Bubble; Phase 5B intentionally does not pretend generic HTML reply parsing is reliable.
+
+```env
+AIRTABLE_ENABLED=true
+AIRTABLE_LOOKBACK_HOURS=336
+AIRTABLE_TOPICS_PER_SECTION=20
+ZAPIER_ENABLED=true
+ZAPIER_LOOKBACK_HOURS=168
+ZAPIER_TOPICS_PER_SECTION=15
+WEB_FETCH_CONCURRENCY=4
+```

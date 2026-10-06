@@ -43,6 +43,11 @@ BUYER_HELP_TERMS = (
     "looking for somebody",
     "looking for help",
     "need help",
+    "looking to hire",
+    "looking for freelance support",
+    "looking for a consultant",
+    "need a consultant",
+    "consultant needed",
     "can someone help",
     "can anyone help",
     "help me fix",
@@ -572,11 +577,22 @@ def _hn_job_like(opportunity: Opportunity, text: str) -> bool:
     return _count(text, HN_JOB_MARKERS) >= 2
 
 
+def _discourse_community(opportunity: Opportunity) -> bool:
+    # Historical name kept for compatibility: this now covers both direct
+    # Discourse JSON adapters and the safe public-HTML community adapter.
+    return opportunity.metadata.get("platform") in {"discourse", "community_web"} or opportunity.source in {
+        "make",
+        "n8n",
+        "hubspot",
+        "shopify",
+        "bubble",
+        "airtable",
+        "zapier",
+    }
+
+
 def _community_marketplace(opportunity: Opportunity) -> bool:
-    return (
-        opportunity.source in {"make", "n8n"}
-        and opportunity.metadata.get("category_kind") == "marketplace"
-    )
+    return _discourse_community(opportunity) and opportunity.metadata.get("category_kind") == "marketplace"
 
 
 def _community_topic(opportunity: Opportunity) -> bool:
@@ -585,7 +601,7 @@ def _community_topic(opportunity: Opportunity) -> bool:
 
 def _community_author_reply(opportunity: Opportunity) -> bool:
     return (
-        opportunity.source in {"make", "n8n"}
+        _discourse_community(opportunity)
         and opportunity.metadata.get("event_type") == "reply"
         and opportunity.metadata.get("is_topic_author") is True
     )
@@ -593,7 +609,7 @@ def _community_author_reply(opportunity: Opportunity) -> bool:
 
 def _community_non_author_reply(opportunity: Opportunity) -> bool:
     return (
-        opportunity.source in {"make", "n8n"}
+        _discourse_community(opportunity)
         and opportunity.metadata.get("event_type") == "reply"
         and opportunity.metadata.get("is_topic_author") is not True
     )
@@ -615,7 +631,7 @@ def _community_recruiter_reply(opportunity: Opportunity, text: str) -> bool:
 
 
 def _community_vendor_promo(opportunity: Opportunity, text: str) -> bool:
-    if opportunity.source not in {"make", "n8n"} or not _community_topic(opportunity):
+    if not _discourse_community(opportunity) or not _community_topic(opportunity):
         return False
     if _has_any(text, STRONG_PAYMENT_TERMS) or _has_any(text, BUYER_HELP_TERMS):
         return False
@@ -869,7 +885,7 @@ def _contactability(opportunity: Opportunity) -> int:
         base = 72
     elif opportunity.source == "github":
         base = 60
-    elif opportunity.source in {"make", "n8n"}:
+    elif _discourse_community(opportunity):
         base = 84
     else:
         base = 65

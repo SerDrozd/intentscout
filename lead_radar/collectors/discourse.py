@@ -43,6 +43,7 @@ class DiscourseCommunityCollector:
         lookback_hours: int = 48,
         max_topics_per_category: int = 20,
         concurrency: int = 6,
+        request_headers: dict[str, str] | None = None,
     ) -> None:
         self.name = name
         self.base_url = base_url.rstrip("/") + "/"
@@ -51,6 +52,7 @@ class DiscourseCommunityCollector:
         self.lookback_hours = max(1, lookback_hours)
         self.max_topics_per_category = max(1, min(50, max_topics_per_category))
         self.concurrency = max(1, min(12, concurrency))
+        self.request_headers = dict(request_headers or {})
 
     @staticmethod
     def _parse_time(raw: Any) -> datetime | None:
@@ -122,12 +124,17 @@ class DiscourseCommunityCollector:
             return []
 
         previous_activity = self.db.get_state(self._activity_key(category, topic_id))
-        if previous_activity == activity_raw:
+        previous_post_raw = self.db.get_state(self._post_key(category, topic_id))
+        previous_post = int(previous_post_raw) if previous_post_raw and previous_post_raw.isdigit() else 0
+
+        # A prior bootstrap may have recorded only the topic activity while the
+        # topic itself was outside the then-current lookback window. If the
+        # lookback is later widened, there is still no post cursor, so we must
+        # re-evaluate the topic instead of permanently treating it as seen.
+        if previous_post > 0 and previous_activity == activity_raw:
             return []
 
         activity_at = self._parse_time(activity_raw)
-        previous_post_raw = self.db.get_state(self._post_key(category, topic_id))
-        previous_post = int(previous_post_raw) if previous_post_raw and previous_post_raw.isdigit() else 0
         cutoff = now - timedelta(hours=self.lookback_hours)
 
         # On bootstrap, ignore dormant topics. Once a topic has a cursor, any new
@@ -265,6 +272,7 @@ class DiscourseCommunityCollector:
             "User-Agent": "the developer-Lead-Radar/0.3 (public Discourse monitoring; local personal use)",
             "Accept": "application/json",
         }
+        headers.update(self.request_headers)
         now = datetime.now(timezone.utc)
         sem = asyncio.Semaphore(self.concurrency)
         out: list[Opportunity] = []
@@ -274,6 +282,10 @@ class DiscourseCommunityCollector:
                 category_url = urljoin(self.base_url, category.path.lstrip("/"))
                 try:
                     payload = await self._get_json(client, category_url)
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code if exc.response is not None else "unknown"
+                    log.warning("%s category %s failed: HTTP %s", self.name, category.key, status)
+                    continue
                 except Exception as exc:
                     log.warning("%s category %s failed: %s", self.name, category.key, type(exc).__name__)
                     continue
@@ -318,6 +330,22 @@ N8N_CATEGORIES = (
 )
 
 
+HUBSPOT_CATEGORIES = (
+    DiscourseCategory("apis_integrations", "c/develop-build-integrate/apis-integrations/80", "business_pain"),
+)
+
+SHOPIFY_CATEGORIES = (
+    DiscourseCategory("webhooks_events", "c/webhooks-and-events/18.json", "business_pain"),
+    DiscourseCategory("fulfillment_inventory", "c/fulfillment-inventory/7.json", "business_pain"),
+    DiscourseCategory("products_orders", "c/product-and-orders-apis/13.json", "business_pain"),
+    DiscourseCategory("authentication", "c/authentication/6.json", "business_pain"),
+)
+
+BUBBLE_CATEGORIES = (
+    DiscourseCategory("jobs_freelance", "c/jobs-freelance/13.json", "marketplace"),
+)
+
+
 class MakeCommunityCollector(DiscourseCommunityCollector):
     def __init__(
         self,
@@ -352,6 +380,75 @@ class N8nCommunityCollector(DiscourseCommunityCollector):
             base_url="https://community.n8n.io/",
             db=db,
             categories=N8N_CATEGORIES,
+            lookback_hours=lookback_hours,
+            max_topics_per_category=max_topics_per_category,
+            concurrency=concurrency,
+        )
+
+
+class HubSpotCommunityCollector(DiscourseCommunityCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 48,
+        max_topics_per_category: int = 20,
+        concurrency: int = 6,
+    ) -> None:
+        super().__init__(
+            name="hubspot",
+            base_url="https://community.hubspot.com/",
+            db=db,
+            categories=HUBSPOT_CATEGORIES,
+            lookback_hours=lookback_hours,
+            max_topics_per_category=max_topics_per_category,
+            concurrency=concurrency,
+            request_headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/141.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://community.hubspot.com/",
+            },
+        )
+
+
+class ShopifyCommunityCollector(DiscourseCommunityCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 48,
+        max_topics_per_category: int = 20,
+        concurrency: int = 6,
+    ) -> None:
+        super().__init__(
+            name="shopify",
+            base_url="https://community.shopify.dev/",
+            db=db,
+            categories=SHOPIFY_CATEGORIES,
+            lookback_hours=lookback_hours,
+            max_topics_per_category=max_topics_per_category,
+            concurrency=concurrency,
+        )
+
+
+class BubbleCommunityCollector(DiscourseCommunityCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 72,
+        max_topics_per_category: int = 30,
+        concurrency: int = 6,
+    ) -> None:
+        super().__init__(
+            name="bubble",
+            base_url="https://forum.bubble.io/",
+            db=db,
+            categories=BUBBLE_CATEGORIES,
             lookback_hours=lookback_hours,
             max_topics_per_category=max_topics_per_category,
             concurrency=concurrency,

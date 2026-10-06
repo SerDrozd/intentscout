@@ -40,6 +40,22 @@ class Settings:
     discourse_concurrency: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
+    hubspot_enabled: bool = True
+    hubspot_lookback_hours: int = 168
+    hubspot_topics_per_category: int = 20
+    shopify_enabled: bool = True
+    shopify_lookback_hours: int = 48
+    shopify_topics_per_category: int = 15
+    bubble_enabled: bool = True
+    bubble_lookback_hours: int = 168
+    bubble_topics_per_category: int = 30
+    airtable_enabled: bool = True
+    airtable_lookback_hours: int = 336
+    airtable_topics_per_section: int = 20
+    zapier_enabled: bool = True
+    zapier_lookback_hours: int = 168
+    zapier_topics_per_section: int = 15
+    web_fetch_concurrency: int = 4
     llm_enabled: bool = True
     openai_api_key: str | None = None
     llm_model: str = "gpt-6-luna"
@@ -98,6 +114,22 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         n8n_enabled=_bool("N8N_ENABLED", True),
         n8n_lookback_hours=int(os.getenv("N8N_LOOKBACK_HOURS", "48")),
         n8n_topics_per_category=int(os.getenv("N8N_TOPICS_PER_CATEGORY", "20")),
+        hubspot_enabled=_bool("HUBSPOT_ENABLED", True),
+        hubspot_lookback_hours=int(os.getenv("HUBSPOT_LOOKBACK_HOURS", "168")),
+        hubspot_topics_per_category=int(os.getenv("HUBSPOT_TOPICS_PER_CATEGORY", "20")),
+        shopify_enabled=_bool("SHOPIFY_ENABLED", True),
+        shopify_lookback_hours=int(os.getenv("SHOPIFY_LOOKBACK_HOURS", "48")),
+        shopify_topics_per_category=int(os.getenv("SHOPIFY_TOPICS_PER_CATEGORY", "15")),
+        bubble_enabled=_bool("BUBBLE_ENABLED", True),
+        bubble_lookback_hours=int(os.getenv("BUBBLE_LOOKBACK_HOURS", "168")),
+        bubble_topics_per_category=int(os.getenv("BUBBLE_TOPICS_PER_CATEGORY", "30")),
+        airtable_enabled=_bool("AIRTABLE_ENABLED", True),
+        airtable_lookback_hours=int(os.getenv("AIRTABLE_LOOKBACK_HOURS", "336")),
+        airtable_topics_per_section=int(os.getenv("AIRTABLE_TOPICS_PER_SECTION", "20")),
+        zapier_enabled=_bool("ZAPIER_ENABLED", True),
+        zapier_lookback_hours=int(os.getenv("ZAPIER_LOOKBACK_HOURS", "168")),
+        zapier_topics_per_section=int(os.getenv("ZAPIER_TOPICS_PER_SECTION", "15")),
+        web_fetch_concurrency=max(1, min(8, int(os.getenv("WEB_FETCH_CONCURRENCY", "4")))),
         discourse_concurrency=int(os.getenv("DISCOURSE_CONCURRENCY", "6")),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,

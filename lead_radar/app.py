@@ -7,7 +7,17 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
-from .collectors import GitHubCollector, HackerNewsCollector, MakeCommunityCollector, N8nCommunityCollector
+from .collectors import (
+    AirtableWebCollector,
+    BubbleCommunityCollector,
+    GitHubCollector,
+    HackerNewsCollector,
+    HubSpotWebCollector,
+    MakeCommunityCollector,
+    N8nCommunityCollector,
+    ShopifyCommunityCollector,
+    ZapierWebCollector,
+)
 from .commercial import assess_commercial
 from .config import Settings, load_keyword_config
 from .database import Database
@@ -88,6 +98,41 @@ class RadarApp:
                 lookback_hours=self.settings.n8n_lookback_hours,
                 max_topics_per_category=self.settings.n8n_topics_per_category,
                 concurrency=self.settings.discourse_concurrency,
+            )
+        if self.settings.hubspot_enabled:
+            yield HubSpotWebCollector(
+                self.db,
+                lookback_hours=self.settings.hubspot_lookback_hours,
+                max_topics_per_section=self.settings.hubspot_topics_per_category,
+                concurrency=self.settings.web_fetch_concurrency,
+            )
+        if self.settings.shopify_enabled:
+            yield ShopifyCommunityCollector(
+                self.db,
+                lookback_hours=self.settings.shopify_lookback_hours,
+                max_topics_per_category=self.settings.shopify_topics_per_category,
+                concurrency=self.settings.discourse_concurrency,
+            )
+        if self.settings.bubble_enabled:
+            yield BubbleCommunityCollector(
+                self.db,
+                lookback_hours=self.settings.bubble_lookback_hours,
+                max_topics_per_category=self.settings.bubble_topics_per_category,
+                concurrency=self.settings.discourse_concurrency,
+            )
+        if self.settings.airtable_enabled:
+            yield AirtableWebCollector(
+                self.db,
+                lookback_hours=self.settings.airtable_lookback_hours,
+                max_topics_per_section=self.settings.airtable_topics_per_section,
+                concurrency=self.settings.web_fetch_concurrency,
+            )
+        if self.settings.zapier_enabled:
+            yield ZapierWebCollector(
+                self.db,
+                lookback_hours=self.settings.zapier_lookback_hours,
+                max_topics_per_section=self.settings.zapier_topics_per_section,
+                concurrency=self.settings.web_fetch_concurrency,
             )
 
 
