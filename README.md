@@ -396,3 +396,12 @@ ZAPIER_LOOKBACK_HOURS=168
 ZAPIER_TOPICS_PER_SECTION=15
 WEB_FETCH_CONCURRENCY=4
 ```
+
+## Phase 6A: HN targeted search + Bluesky public search
+
+Phase 6A adds two no-credential discovery sensors while keeping the existing deterministic/LLM gates:
+
+- `hn_algolia`: targeted Hacker News `search_by_date` queries over stories and comments, with per-query timestamp cursors and a five-minute overlap for late indexing. Opportunities are stored under the existing `hackernews` source so direct HN fetches still deduplicate against them.
+- `bluesky`: public `app.bsky.feed.searchPosts` queries against the Bluesky AppView. Query families rotate across cycles and only fresh local-lookback results are emitted. No Bluesky account or token is required.
+
+HubSpot public-page polling is disabled by default after repeatable HTTP 403 responses from the local client. It remains available behind `HUBSPOT_ENABLED=true` for future experiments, but it no longer wastes time or logs warnings in the normal loop.

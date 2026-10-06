@@ -883,6 +883,8 @@ def _decision_maker_probability(text: str, author_type: AuthorType) -> int:
 def _contactability(opportunity: Opportunity) -> int:
     if opportunity.source == "hackernews":
         base = 72
+    elif opportunity.source == "bluesky":
+        base = 84
     elif opportunity.source == "github":
         base = 60
     elif _discourse_community(opportunity):

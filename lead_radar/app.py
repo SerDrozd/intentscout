@@ -9,8 +9,10 @@ from datetime import datetime
 
 from .collectors import (
     AirtableWebCollector,
+    BlueskyCollector,
     BubbleCommunityCollector,
     GitHubCollector,
+    HackerNewsAlgoliaCollector,
     HackerNewsCollector,
     HubSpotWebCollector,
     MakeCommunityCollector,
@@ -72,12 +74,26 @@ class RadarApp:
         )
 
     def collectors(self):
+        if self.settings.hn_algolia_enabled:
+            yield HackerNewsAlgoliaCollector(
+                self.db,
+                lookback_hours=self.settings.hn_algolia_lookback_hours,
+                results_per_query=self.settings.hn_algolia_results_per_query,
+                queries_per_cycle=self.settings.hn_algolia_queries_per_cycle,
+            )
         if self.settings.hn_enabled:
             yield HackerNewsCollector(
                 self.db,
                 bootstrap_items=self.settings.hn_bootstrap_items,
                 max_items_per_cycle=self.settings.hn_max_items_per_cycle,
                 concurrency=self.settings.hn_concurrency,
+            )
+        if self.settings.bluesky_enabled:
+            yield BlueskyCollector(
+                self.db,
+                lookback_hours=self.settings.bluesky_lookback_hours,
+                results_per_query=self.settings.bluesky_results_per_query,
+                queries_per_cycle=self.settings.bluesky_queries_per_cycle,
             )
         if self.settings.github_enabled:
             yield GitHubCollector(

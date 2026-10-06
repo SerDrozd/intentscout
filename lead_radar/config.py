@@ -40,7 +40,15 @@ class Settings:
     discourse_concurrency: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
-    hubspot_enabled: bool = True
+    hn_algolia_enabled: bool = True
+    hn_algolia_lookback_hours: int = 48
+    hn_algolia_results_per_query: int = 50
+    hn_algolia_queries_per_cycle: int = 6
+    bluesky_enabled: bool = True
+    bluesky_lookback_hours: int = 24
+    bluesky_results_per_query: int = 25
+    bluesky_queries_per_cycle: int = 6
+    hubspot_enabled: bool = False
     hubspot_lookback_hours: int = 168
     hubspot_topics_per_category: int = 20
     shopify_enabled: bool = True
@@ -104,6 +112,14 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         hn_bootstrap_items=int(os.getenv("HN_BOOTSTRAP_ITEMS", "300")),
         hn_max_items_per_cycle=int(os.getenv("HN_MAX_ITEMS_PER_CYCLE", "500")),
         hn_concurrency=int(os.getenv("HN_CONCURRENCY", "20")),
+        hn_algolia_enabled=_bool("HN_ALGOLIA_ENABLED", True),
+        hn_algolia_lookback_hours=max(1, int(os.getenv("HN_ALGOLIA_LOOKBACK_HOURS", "48"))),
+        hn_algolia_results_per_query=max(1, min(100, int(os.getenv("HN_ALGOLIA_RESULTS_PER_QUERY", "50")))),
+        hn_algolia_queries_per_cycle=max(1, int(os.getenv("HN_ALGOLIA_QUERIES_PER_CYCLE", "6"))),
+        bluesky_enabled=_bool("BLUESKY_ENABLED", True),
+        bluesky_lookback_hours=max(1, int(os.getenv("BLUESKY_LOOKBACK_HOURS", "24"))),
+        bluesky_results_per_query=max(1, min(100, int(os.getenv("BLUESKY_RESULTS_PER_QUERY", "25")))),
+        bluesky_queries_per_cycle=max(1, int(os.getenv("BLUESKY_QUERIES_PER_CYCLE", "6"))),
         github_enabled=_bool("GITHUB_ENABLED", True),
         github_token=os.getenv("GITHUB_TOKEN") or None,
         github_lookback_hours=int(os.getenv("GITHUB_LOOKBACK_HOURS", "24")),
@@ -114,7 +130,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         n8n_enabled=_bool("N8N_ENABLED", True),
         n8n_lookback_hours=int(os.getenv("N8N_LOOKBACK_HOURS", "48")),
         n8n_topics_per_category=int(os.getenv("N8N_TOPICS_PER_CATEGORY", "20")),
-        hubspot_enabled=_bool("HUBSPOT_ENABLED", True),
+        hubspot_enabled=_bool("HUBSPOT_ENABLED", False),
         hubspot_lookback_hours=int(os.getenv("HUBSPOT_LOOKBACK_HOURS", "168")),
         hubspot_topics_per_category=int(os.getenv("HUBSPOT_TOPICS_PER_CATEGORY", "20")),
         shopify_enabled=_bool("SHOPIFY_ENABLED", True),
