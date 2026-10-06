@@ -40,6 +40,9 @@ class Settings:
     discourse_concurrency: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
+    rss_feeds_path: Path = Path("./config/feeds.yaml")
+    rss_enabled: bool = True
+    rss_concurrency: int = 4
     hn_algolia_enabled: bool = True
     hn_algolia_lookback_hours: int = 48
     hn_algolia_results_per_query: int = 50
@@ -98,6 +101,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
     return Settings(
         db_path=relpath("RADAR_DB", "./data/radar.db"),
         keywords_path=relpath("KEYWORDS_CONFIG", "./config/keywords.yaml"),
+        rss_feeds_path=relpath("RSS_FEEDS_CONFIG", "./config/feeds.yaml"),
         poll_interval_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "180")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         alert_threshold=int(os.getenv("ALERT_THRESHOLD", "13")),
@@ -148,6 +152,8 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         web_fetch_concurrency=max(1, min(8, int(os.getenv("WEB_FETCH_CONCURRENCY", "4")))),
         discourse_concurrency=int(os.getenv("DISCOURSE_CONCURRENCY", "6")),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
+        rss_enabled=_bool("RSS_ENABLED", True),
+        rss_concurrency=max(1, min(8, int(os.getenv("RSS_CONCURRENCY", "4")))),
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
         llm_enabled=_bool("LLM_ENABLED", True),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,

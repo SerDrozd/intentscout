@@ -1,3 +1,63 @@
+# Lead Radar v2.3 Phase 6B - Config-driven RSS/Atom discovery
+
+Phase 6B adds a generic public RSS/Atom collector so new feed sources can be added in YAML without writing a new Python adapter. It keeps the same deterministic matcher, commercial scoring, SQLite dedupe, LLM precision gate and Telegram controls.
+
+## Phase 6B adds
+
+- RSS 2.0, Atom 1.0 and common RDF/RSS item parsing using the Python standard library;
+- `config/feeds.yaml` for feed definitions;
+- per-feed lookback, item caps, category kind and source labels;
+- ETag / Last-Modified conditional requests;
+- per-feed publication cursors with a small overlap window;
+- per-feed minimum polling intervals so slow feeds are not hammered by the 3-minute radar cycle;
+- bundled public Jobicy freelance/contract engineering feeds as the first marketplace RSS source;
+- a disabled Google Alerts example that can be enabled locally by pasting a personal RSS URL;
+- RSS marketplace items reuse the same buyer/seller/recruiter and LLM gates as existing communities.
+
+No new API key is required for the bundled public feeds. Jobicy feeds are hard-limited in `feeds.yaml` to one request per feed per hour.
+
+## New environment variables
+
+```env
+RSS_ENABLED=true
+RSS_FEEDS_CONFIG=./config/feeds.yaml
+RSS_CONCURRENCY=4
+```
+
+## Add another feed
+
+Edit `config/feeds.yaml`:
+
+```yaml
+feeds:
+  - key: my_feed
+    source: my_source
+    name: My buyer-intent feed
+    url: "https://example.com/feed.xml"
+    enabled: true
+    category_kind: business_pain
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 15
+```
+
+Use `category_kind: marketplace` only for feeds where posts are actually hiring/contract/project listings.
+
+## Verify Phase 6B
+
+```powershell
+ruff check .
+mypy lead_radar
+python -m pytest -q
+python -m compileall -q lead_radar
+git diff --check
+python -m lead_radar once
+```
+
+A normal cycle now includes a line such as `rss fetched N item(s)`.
+
+---
+
 # Lead Radar v1.7 Phase 2 - Make + n8n Direct Buyer Sources
 
 Phase 2 keeps the existing private/local Lead Radar and adds direct public Discourse adapters for the two most commercially useful automation communities in the current plan. No account or API key is required for these adapters.

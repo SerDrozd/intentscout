@@ -8,6 +8,7 @@ from .bluesky import BlueskyCollector
 from .github import GitHubCollector
 from .hackernews import HackerNewsCollector
 from .hn_algolia import HackerNewsAlgoliaCollector
+from .rss import RSSCollector
 from .web_community import AirtableWebCollector, HubSpotWebCollector, ZapierWebCollector
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "GitHubCollector",
     "HackerNewsAlgoliaCollector",
     "HackerNewsCollector",
+    "RSSCollector",
     "AirtableWebCollector",
     "BubbleCommunityCollector",
     "HubSpotWebCollector",

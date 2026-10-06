@@ -580,7 +580,7 @@ def _hn_job_like(opportunity: Opportunity, text: str) -> bool:
 def _discourse_community(opportunity: Opportunity) -> bool:
     # Historical name kept for compatibility: this now covers both direct
     # Discourse JSON adapters and the safe public-HTML community adapter.
-    return opportunity.metadata.get("platform") in {"discourse", "community_web"} or opportunity.source in {
+    return opportunity.metadata.get("platform") in {"discourse", "community_web", "rss"} or opportunity.source in {
         "make",
         "n8n",
         "hubspot",

@@ -17,6 +17,7 @@ from .collectors import (
     HubSpotWebCollector,
     MakeCommunityCollector,
     N8nCommunityCollector,
+    RSSCollector,
     ShopifyCommunityCollector,
     ZapierWebCollector,
 )
@@ -94,6 +95,12 @@ class RadarApp:
                 lookback_hours=self.settings.bluesky_lookback_hours,
                 results_per_query=self.settings.bluesky_results_per_query,
                 queries_per_cycle=self.settings.bluesky_queries_per_cycle,
+            )
+        if self.settings.rss_enabled:
+            yield RSSCollector(
+                self.db,
+                config_path=self.settings.rss_feeds_path,
+                concurrency=self.settings.rss_concurrency,
             )
         if self.settings.github_enabled:
             yield GitHubCollector(

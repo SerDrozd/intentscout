@@ -1,0 +1,35 @@
+feeds:
+  # Public Jobicy RSS. No API key is required. These are deliberately limited to
+  # freelance/contract engineering searches; deterministic commercial scoring and
+  # the LLM gate still reject ordinary employment noise.
+  - key: jobicy_freelance_automation
+    source: jobicy
+    name: Jobicy freelance automation
+    url: "https://jobicy.com/jobs/feed?industry=engineering&type=freelance&tag=automation"
+    enabled: true
+    category_kind: marketplace
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 60
+
+  - key: jobicy_contract_python
+    source: jobicy
+    name: Jobicy contract Python
+    url: "https://jobicy.com/jobs/feed?industry=engineering&type=contract&tag=python"
+    enabled: true
+    category_kind: marketplace
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 60
+
+  # Add Google Alerts or any other public RSS/Atom feeds here without changing
+  # Python code. Keep disabled until you replace the URL locally.
+  - key: google_alerts_example
+    source: google_alerts
+    name: Google Alerts buyer-intent example
+    url: "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"
+    enabled: false
+    category_kind: business_pain
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 15
