@@ -41,6 +41,8 @@ class Settings:
     telegram_bot_token: str | None
     telegram_chat_id: str | None
     rss_feeds_path: Path = Path("./config/feeds.yaml")
+    rss_local_feeds_path: Path = Path("./config/feeds.local.yaml")
+    google_alerts_queries_path: Path = Path("./config/google_alerts_queries.yaml")
     rss_enabled: bool = True
     rss_concurrency: int = 4
     adaptive_scheduling_enabled: bool = True
@@ -105,6 +107,8 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         db_path=relpath("RADAR_DB", "./data/radar.db"),
         keywords_path=relpath("KEYWORDS_CONFIG", "./config/keywords.yaml"),
         rss_feeds_path=relpath("RSS_FEEDS_CONFIG", "./config/feeds.yaml"),
+        rss_local_feeds_path=relpath("RSS_LOCAL_FEEDS_CONFIG", "./config/feeds.local.yaml"),
+        google_alerts_queries_path=relpath("GOOGLE_ALERTS_QUERIES_CONFIG", "./config/google_alerts_queries.yaml"),
         poll_interval_seconds=int(os.getenv("POLL_INTERVAL_SECONDS", "180")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         alert_threshold=int(os.getenv("ALERT_THRESHOLD", "13")),

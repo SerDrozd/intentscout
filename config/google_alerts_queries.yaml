@@ -1,54 +1,88 @@
-# Suggested Google Alerts query pack for buyer-intent discovery.
-# This file is documentation/configuration aid only: Lead Radar never creates
-# Google Alerts or guesses private feed URLs. Create the alert in your Google
-# account, choose RSS delivery, then copy its real feed URL into config/feeds.yaml.
+# Buyer-intent Google Alerts query pack.
+# Create only the alerts you want in Google Alerts, choose RSS delivery, then add
+# each real feed URL with `python -m lead_radar alerts-add --key ... --url ...`.
+# The URL is stored in config/feeds.local.yaml, which is gitignored.
 alerts:
   - key: looking_developer_api
     query: '"looking for developer" API'
     feed_key: google_alerts_looking_developer_api
     category_kind: marketplace
+    priority: P0
+    rationale: Direct buyer-language around an API implementation need.
 
   - key: need_developer_webhook
     query: '"need a developer" webhook'
     feed_key: google_alerts_need_developer_webhook
     category_kind: marketplace
+    priority: P0
+    rationale: Direct hiring language paired with a strong technical-fit keyword.
 
   - key: freelancer_automation
     query: '"looking for freelancer" automation'
     feed_key: google_alerts_freelancer_automation
     category_kind: marketplace
+    priority: P0
+    rationale: Explicit freelance intent for the core automation offer.
 
   - key: contractor_python
     query: '"need contractor" Python'
     feed_key: google_alerts_contractor_python
     category_kind: marketplace
+    priority: P1
+    rationale: Contracting intent with a stack match, but broader employment noise is possible.
 
   - key: willing_pay_api
     query: '"willing to pay" API'
     feed_key: google_alerts_willing_pay_api
     category_kind: business_pain
+    priority: P0
+    rationale: Explicit payment signal with API work.
 
-  - key: manual_process_automation
-    query: '"manual process" automation'
-    feed_key: google_alerts_manual_process_automation
+  - key: urgent_api_fix
+    query: '"need help" API "urgent"'
+    feed_key: google_alerts_urgent_api_fix
     category_kind: business_pain
+    priority: P0
+    rationale: Urgency plus technical pain can surface short paid debugging work.
 
   - key: hubspot_webhook_help
     query: '"need help" HubSpot webhook'
     feed_key: google_alerts_hubspot_webhook_help
     category_kind: business_pain
+    priority: P1
+    rationale: CRM/webhook integration pain closely matches the service profile.
 
   - key: make_automation_help
     query: '"need help" "Make.com" automation'
     feed_key: google_alerts_make_automation_help
     category_kind: business_pain
+    priority: P1
+    rationale: Captures public workflow problems outside the Make community itself.
 
   - key: n8n_developer
     query: 'n8n "looking for" developer'
     feed_key: google_alerts_n8n_developer
     category_kind: marketplace
+    priority: P1
+    rationale: Buyer-language around n8n implementation or overflow work.
 
   - key: shopify_webhook_developer
-    query: 'Shopify webhook developer'
+    query: 'Shopify webhook "developer"'
     feed_key: google_alerts_shopify_webhook_developer
     category_kind: business_pain
+    priority: P1
+    rationale: Shopify integration and webhook failures can be bounded paid fixes.
+
+  - key: crm_integration_help
+    query: '"need help" CRM integration API'
+    feed_key: google_alerts_crm_integration_help
+    category_kind: business_pain
+    priority: P1
+    rationale: General CRM/API pain broadens beyond HubSpot without becoming generic software search.
+
+  - key: manual_process_automation
+    query: '"manual process" automate business'
+    feed_key: google_alerts_manual_process_automation
+    category_kind: business_pain
+    priority: P2
+    rationale: Earlier-stage pain signal; useful for discovery but expected to be noisier.

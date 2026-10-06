@@ -1,0 +1,14 @@
+# Copying this file is optional. Prefer `alerts-add`, which writes the real feed
+# URL to config/feeds.local.yaml. That local file is gitignored on purpose.
+feeds:
+  - key: google_alerts_looking_developer_api
+    source: google_alerts
+    name: "Google Alerts: looking_developer_api"
+    url: "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"
+    enabled: false
+    category_kind: marketplace
+    query_key: looking_developer_api
+    search_query: '"looking for developer" API'
+    lookback_hours: 168
+    max_items: 50
+    min_poll_minutes: 15

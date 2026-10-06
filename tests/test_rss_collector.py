@@ -189,6 +189,8 @@ def test_feed_config_and_phase6b_settings(tmp_path, monkeypatch):
     assert settings.rss_enabled is True
     assert settings.rss_concurrency == 4
     assert settings.rss_feeds_path == (tmp_path / "config" / "feeds.yaml").resolve()
+    assert settings.rss_local_feeds_path == (tmp_path / "config" / "feeds.local.yaml").resolve()
+    assert settings.google_alerts_queries_path == (tmp_path / "config" / "google_alerts_queries.yaml").resolve()
 
 
 def test_bundled_jobicy_feeds_are_hourly_marketplace_sources() -> None:

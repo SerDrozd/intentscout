@@ -8,6 +8,12 @@ from pathlib import Path
 
 from .app import RadarApp
 from .config import load_settings
+from .google_alerts import (
+    build_google_alert_plan,
+    combined_feed_definitions,
+    load_google_alert_queries,
+    upsert_google_alert_feed,
+)
 from .llm import LLMAPIError, LLMBudgetExceeded
 from .optimizer import advise_roi
 
@@ -54,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     schedule_plan = sub.add_parser("schedule-plan", help="Preview safe adaptive polling/query allocation")
     schedule_plan.add_argument("--days", type=int, default=None, help="ROI window; defaults to ADAPTIVE_WINDOW_DAYS")
+    alerts_plan = sub.add_parser("alerts-plan", help="Show buyer-intent Google Alerts setup and ROI status")
+    alerts_plan.add_argument("--days", type=int, default=30, help="ROI window for configured Google Alerts")
+    alerts_add = sub.add_parser("alerts-add", help="Add or update one real Google Alerts RSS URL locally")
+    alerts_add.add_argument("--key", required=True, help="Query key from alerts-plan")
+    alerts_add.add_argument("--url", required=True, help="Real Google Alerts RSS feed URL")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -200,6 +211,51 @@ async def async_main(args: argparse.Namespace) -> int:
             )
             print(f"  reason: {schedule_row['reason']}")
         print("Preview only: no .env/YAML/source-enable setting was changed.")
+        return 0
+    if args.command == "alerts-plan":
+        queries = load_google_alert_queries(settings.google_alerts_queries_path)
+        feeds = combined_feed_definitions(settings.rss_feeds_path, settings.rss_local_feeds_path)
+        plan_rows = build_google_alert_plan(queries, feeds)
+        roi_rows = app.db.roi_report(days=args.days, by_query=True, sources=("google_alerts",))
+        roi_by_key = {str(row["key"]): row for row in roi_rows}
+        print(
+            f"Google Alerts buyer-signal plan: {args.days}d | "
+            f"local_config={settings.rss_local_feeds_path} | committed_urls=false"
+        )
+        for alert_row in plan_rows:
+            alert_roi_row = roi_by_key.get(alert_row.key)
+            metrics = ""
+            if alert_roi_row is not None:
+                actionable = int(_number(alert_roi_row["p0"])) + int(_number(alert_roi_row["p1"]))
+                metrics = (
+                    f" leads={alert_roi_row['leads']} actionable={actionable} "
+                    f"contacted={alert_roi_row['contacted']} replied={alert_roi_row['replied']} "
+                    f"won={alert_roi_row['won']} revenue=${_number(alert_roi_row['revenue']):.2f}"
+                )
+            print(
+                f"{alert_row.priority} {alert_row.key} status={alert_row.status} "
+                f"category={alert_row.category_kind}{metrics}\n"
+                f"  query: {alert_row.query}\n"
+                f"  why: {alert_row.rationale}"
+            )
+        print("Real feed URLs belong only in the gitignored local RSS config.")
+        return 0
+    if args.command == "alerts-add":
+        queries = load_google_alert_queries(settings.google_alerts_queries_path)
+        query_by_key = {query.key: query for query in queries}
+        selected = query_by_key.get(str(args.key))
+        if selected is None:
+            print(f"Unknown Google Alerts query key: {args.key}. Run alerts-plan first.")
+            return 2
+        try:
+            upsert_google_alert_feed(settings.rss_local_feeds_path, selected, str(args.url))
+        except ValueError as exc:
+            print(str(exc))
+            return 2
+        print(
+            f"Configured {selected.key} in {settings.rss_local_feeds_path}. "
+            "The local file is gitignored; run alerts-plan to verify ACTIVE status."
+        )
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())

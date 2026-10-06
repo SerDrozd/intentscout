@@ -178,6 +178,7 @@ class RadarApp:
             yield RSSCollector(
                 self.db,
                 config_path=self.settings.rss_feeds_path,
+                extra_config_paths=(self.settings.rss_local_feeds_path,),
                 concurrency=self.settings.rss_concurrency,
             )
         if self.settings.github_enabled:

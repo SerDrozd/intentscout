@@ -33,6 +33,8 @@ class FeedDefinition:
     lookback_hours: int = 168
     max_items: int = 50
     min_poll_minutes: int = 5
+    query_key: str | None = None
+    search_query: str | None = None
 
 
 def _local_name(tag: str) -> str:
@@ -164,6 +166,8 @@ def load_feed_definitions(path: Path) -> tuple[FeedDefinition, ...]:
                 lookback_hours=max(1, int(raw.get("lookback_hours", 168))),
                 max_items=max(1, min(200, int(raw.get("max_items", 50)))),
                 min_poll_minutes=max(0, int(raw.get("min_poll_minutes", 5))),
+                query_key=(str(raw.get("query_key") or "").strip() or None),
+                search_query=(str(raw.get("search_query") or "").strip() or None),
             )
         )
     return tuple(feeds)
@@ -177,11 +181,13 @@ class RSSCollector:
         db: Database,
         *,
         config_path: Path,
+        extra_config_paths: tuple[Path, ...] = (),
         concurrency: int = 4,
         overlap_seconds: int = 300,
     ) -> None:
         self.db = db
         self.config_path = config_path
+        self.extra_config_paths = extra_config_paths
         self.concurrency = max(1, min(8, concurrency))
         self.overlap_seconds = max(0, overlap_seconds)
 
@@ -297,6 +303,8 @@ class RSSCollector:
                         "feed_name": feed.name,
                         "feed_url": feed.url,
                         "category_kind": feed.category_kind,
+                        "query_key": feed.query_key,
+                        "search_query": feed.search_query,
                         "event_type": "topic",
                         "reply_count": None,
                     },
@@ -308,7 +316,13 @@ class RSSCollector:
         return opportunities
 
     async def collect(self) -> list[Opportunity]:
-        feeds = tuple(feed for feed in load_feed_definitions(self.config_path) if feed.enabled)
+        by_key: dict[str, FeedDefinition] = {feed.key: feed for feed in load_feed_definitions(self.config_path)}
+        for path in self.extra_config_paths:
+            if not path.exists():
+                continue
+            for feed in load_feed_definitions(path):
+                by_key[feed.key] = feed
+        feeds = tuple(feed for feed in by_key.values() if feed.enabled)
         if not feeds:
             return []
 

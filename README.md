@@ -587,3 +587,24 @@ ADAPTIVE_SCHEDULING_ENABLED=false
 ### Google Alerts query pack
 
 `config/google_alerts_queries.yaml` contains buyer-intent alert suggestions, but Lead Radar does not create alerts or invent account-specific RSS URLs. Create an alert yourself, choose RSS delivery, then add the real feed URL to `config/feeds.yaml` using the existing RSS collector. No Python code is required.
+
+## Phase 8B: buyer-signal Google Alerts overlay
+
+Google Alerts can now be added without placing account-specific RSS URLs in tracked files. The tracked query pack lives in `config/google_alerts_queries.yaml`; real feed URLs are written to `config/feeds.local.yaml`, which is gitignored.
+
+Preview the buyer-intent pack and current setup status:
+
+```powershell
+python -m lead_radar alerts-plan
+```
+
+After creating one alert in Google Alerts and selecting RSS delivery, add its real feed URL locally:
+
+```powershell
+python -m lead_radar alerts-add --key YOUR_QUERY_KEY --url "YOUR_REAL_GOOGLE_ALERTS_RSS_URL"
+python -m lead_radar alerts-plan
+```
+
+The local RSS overlay is merged after `config/feeds.yaml`, so local entries can safely override a tracked template without editing or exposing the tracked file. Google Alerts opportunities carry `query_key` and `search_query` metadata, so `roi --by query` attributes downstream contact/reply/win data to the actual buyer-intent query instead of only to the feed filename.
+
+`alerts-add` validates that the URL is HTTPS and points to a Google Alerts `/alerts/feeds/` path. It never creates an alert in the Google account and never commits the feed URL.

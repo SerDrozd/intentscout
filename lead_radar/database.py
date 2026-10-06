@@ -773,7 +773,7 @@ class Database:
             metadata = {}
         if not isinstance(metadata, dict):
             metadata = {}
-        for key in ("query_family", "broad_query", "feed_key", "category_key"):
+        for key in ("query_family", "broad_query", "query_key", "feed_key", "category_key"):
             value = metadata.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
