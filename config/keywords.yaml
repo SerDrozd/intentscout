@@ -1,0 +1,1169 @@
+version: 1
+name: Technical/API Problem Radar
+matching:
+  case_sensitive: false
+  normalize_whitespace: true
+  match_title: true
+  match_body: true
+  phrases:
+    explicit_help_hire:
+    - need help with API
+    - need help with an API
+    - looking for help with API
+    - looking for someone to help with API
+    - need someone to fix API
+    - need someone to build API
+    - need someone to integrate API
+    - need a developer for API integration
+    - looking for API developer
+    - looking for backend developer
+    - need backend help
+    - need Python help
+    - need a Python developer
+    - looking for Python developer
+    - can someone help me fix this
+    - can anyone help me fix this
+    - can someone help with this integration
+    - can anyone help with this integration
+    - willing to pay for help
+    - happy to pay for help
+    - can pay someone to fix this
+    - pay someone to build this
+    - need a freelancer to fix
+    - need a contractor to fix
+    - anyone available to help with
+    api_failures:
+    - API not working
+    - API stopped working
+    - API keeps failing
+    - API request failing
+    - API requests are failing
+    - API call failing
+    - API calls are failing
+    - API returning error
+    - API returns error
+    - API returns 500
+    - API returning 500
+    - API returns 401
+    - API returning 401
+    - API returns 403
+    - API returning 403
+    - API timeout
+    - API timing out
+    - API connection error
+    - API integration broken
+    - API suddenly stopped working
+    - API works locally but not in production
+    - API works in dev but not production
+    - can't get API to work
+    - cannot get API to work
+    - struggling with API
+    integrations:
+    - need to integrate
+    - trying to integrate
+    - struggling to integrate
+    - can't integrate
+    - cannot integrate
+    - how do I integrate
+    - how to integrate this with
+    - connect this API to
+    - connect X to Y
+    - connect two APIs
+    - integrate two APIs
+    - integrate with our CRM
+    - integrate with our backend
+    - integrate with our app
+    - integration stopped working
+    - integration keeps failing
+    - integration is broken
+    - integration issue
+    - integration problem
+    - third party integration issue
+    - third-party API problem
+    - need custom integration
+    - custom API integration
+    - replace Zapier with code
+    - Zapier integration failing
+    webhooks:
+    - webhook not working
+    - webhook stopped working
+    - webhook keeps failing
+    - webhook failing
+    - webhook not firing
+    - webhook not triggering
+    - webhook not received
+    - webhook not arriving
+    - webhook timeout
+    - webhook returns 500
+    - webhook signature invalid
+    - webhook verification failed
+    - webhook duplicate events
+    - webhook missing events
+    - webhook delayed
+    - webhook retries
+    - webhook handler broken
+    - webhook endpoint failing
+    - can't get webhook to work
+    - cannot get webhook to work
+    - need help with webhook
+    - how to debug webhook
+    - webhook works locally but not production
+    - webhook integration issue
+    - webhook integration broken
+    auth_oauth:
+    - OAuth not working
+    - OAuth flow broken
+    - OAuth callback error
+    - OAuth redirect error
+    - OAuth token expired
+    - OAuth refresh token issue
+    - refresh token not working
+    - access token not working
+    - token keeps expiring
+    - authentication failing
+    - authentication not working
+    - authorization failing
+    - authorization error API
+    - API key not working
+    - API key rejected
+    - invalid API key
+    - invalid token
+    - 401 unauthorized API
+    - 403 forbidden API
+    - can't authenticate API
+    - cannot authenticate API
+    - need help with OAuth
+    - OAuth integration issue
+    - JWT verification failing
+    - JWT token invalid
+    sync_data:
+    - data not syncing
+    - sync not working
+    - sync stopped working
+    - sync keeps failing
+    - records not syncing
+    - CRM not syncing
+    - database not syncing
+    - two way sync not working
+    - two-way sync issue
+    - need to sync data between
+    - how to sync data between
+    - sync API data
+    - automate data sync
+    - import failing
+    - data import failing
+    - CSV import failing
+    - export not working
+    - data export failing
+    - need to import data from API
+    - need to export data through API
+    - duplicate records after sync
+    - missing records after sync
+    - sync creates duplicates
+    - data mismatch between systems
+    - keep two systems in sync
+    automation_workflows:
+    - can this be automated
+    - how can I automate this
+    - how do I automate this
+    - need to automate this
+    - want to automate this
+    - trying to automate this
+    - automate this workflow
+    - automate our workflow
+    - automate a manual process
+    - manual process takes hours
+    - doing this manually
+    - we do this manually
+    - copying data manually
+    - copy paste every day
+    - copy paste every week
+    - manually entering data
+    - manual data entry
+    - automate data entry
+    - automate report generation
+    - automate API calls
+    - automate spreadsheet updates
+    - automate CRM updates
+    - replace manual workflow
+    - script this process
+    - need a script to automate
+    scraping_extraction:
+    - need to scrape
+    - need help scraping
+    - trying to scrape
+    - can't scrape
+    - cannot scrape
+    - scraper stopped working
+    - scraper is broken
+    - scraper keeps failing
+    - web scraping issue
+    - web scraping problem
+    - website changed scraper broke
+    - extract data from website
+    - need to extract data from website
+    - scrape data into CSV
+    - scrape data into database
+    - scrape multiple pages
+    - scrape dynamic website
+    - scrape JavaScript website
+    - scrape behind login
+    - scraping pagination issue
+    - scraping rate limit
+    - scraping blocked
+    - Cloudflare blocking scraper
+    - need data extraction script
+    - automate web data extraction
+    backend_production:
+    - backend not working
+    - backend keeps crashing
+    - backend error in production
+    - production API error
+    - production backend issue
+    - works locally but fails in production
+    - works locally not on server
+    - deployment failing
+    - deployment keeps failing
+    - app crashes in production
+    - FastAPI not working
+    - FastAPI deployment issue
+    - FastAPI production error
+    - FastAPI endpoint not working
+    - Python backend issue
+    - Python API issue
+    - server returns 500
+    - internal server error API
+    - database connection failing
+    - connection pool issue
+    - background task failing
+    - Celery task failing
+    - cron job stopped working
+    - scheduled job failing
+    - need help deploying backend
+    ship_fix_mvp:
+    - need help shipping MVP
+    - need help finishing MVP
+    - prototype needs backend
+    - prototype not production ready
+    - need to productionize
+    - need help getting to production
+    - need to fix before launch
+    - launch blocked by bug
+    - blocked by integration
+    - stuck on integration
+    - stuck on backend
+    - stuck with API
+    - can't ship because
+    - cannot ship because
+    - need someone to debug
+    - need help debugging
+    - urgent backend issue
+    - urgent API issue
+    - production bug need help
+    - client integration issue
+    - client API issue
+    - customer integration broken
+    - need quick fix API
+    - need quick backend fix
+    - need technical help ASAP
+hard_exclude_phrases:
+- homework help
+- school assignment
+- university assignment
+- college assignment
+- exam question
+- interview question
+- leetcode
+- codewars
+- hire me
+- available for work
+- open to work
+- my resume
+- free course
+- tutorial for beginners
+soft_penalty_phrases:
+- learning python
+- beginner
+- student project
+- portfolio project
+- for practice
+- toy project
+- just curious
+- hypothetical
+- solved
+- fixed it
+- never mind
+- not urgent
+positive_context_phrases:
+- production
+- client
+- customer
+- business
+- our team
+- our company
+- SaaS
+- startup
+- launch
+- deadline
+- urgent
+- ASAP
+- willing to pay
+- happy to pay
+- budget
+- freelancer
+- contractor
+scoring:
+  freshness:
+    lt_15m: 6
+    lt_1h: 5
+    lt_6h: 3
+    lt_24h: 1
+    gt_72h: -3
+  intent:
+    explicit_pay_or_hire: 7
+    need_someone: 6
+    explicit_help: 4
+    concrete_problem: 3
+    production_or_business_context: 4
+    urgent: 3
+    strong_technical_fit: 4
+    direct_contact_possible: 2
+  penalties:
+    hard_exclude: -100
+    student_or_tutorial: -8
+    reverse_intent_job_seeker: -8
+    already_solved: -6
+    generic_discussion: -3
+  thresholds:
+    telegram_immediate: 13
+    review_queue: 8
+signal_rules:
+  explicit_help_hire:
+    anchors:
+    - api
+    - webhook
+    - integration
+    - integrate
+    - oauth
+    - backend
+    - python
+    - fastapi
+    - scrap
+    - automation
+    - data sync
+    - database
+    - deployment
+    - server
+    triggers:
+    - need help
+    - need someone
+    - looking for someone
+    - looking for help
+    - can someone
+    - can anyone
+    - anyone available
+    - willing to pay
+    - happy to pay
+    - pay someone
+    - freelancer
+    - contractor
+    - developer to
+    - help me fix
+    - help fixing
+  api_failures:
+    anchors:
+    - api
+    - endpoint
+    - request
+    - response
+    triggers:
+    - not working
+    - stopped working
+    - keep failing
+    - keeps failing
+    - fail
+    - failing
+    - failed
+    - error
+    - broken
+    - timeout
+    - timing out
+    - '401'
+    - '403'
+    - '500'
+    - issue
+    - problem
+    - struggling
+  integrations:
+    anchors:
+    - integration
+    - integrate
+    - connecting
+    - 'connect '
+    triggers:
+    - need
+    - trying
+    - struggling
+    - can't
+    - cannot
+    - fail
+    - failing
+    - failed
+    - broken
+    - error
+    - issue
+    - problem
+    - help
+    - how do
+    - how to
+    - stuck
+  webhooks:
+    anchors:
+    - webhook
+    triggers:
+    - not working
+    - stopped
+    - fail
+    - failing
+    - failed
+    - not firing
+    - not triggering
+    - not receiving
+    - not received
+    - missing
+    - delayed
+    - timeout
+    - invalid
+    - broken
+    - error
+    - issue
+    - problem
+    - help
+    - debug
+    - duplicate
+  auth_oauth:
+    anchors:
+    - oauth
+    - authentication
+    - authorization
+    - refresh token
+    - access token
+    - jwt
+    - api key
+    triggers:
+    - not working
+    - fail
+    - failing
+    - failed
+    - error
+    - broken
+    - expired
+    - expiring
+    - invalid
+    - rejected
+    - '401'
+    - '403'
+    - issue
+    - problem
+    - help
+    - struggling
+    - can't
+    - cannot
+  sync_data:
+    anchors:
+    - sync
+    - import
+    - export
+    - records
+    - data pipeline
+    triggers:
+    - not working
+    - stopped
+    - fail
+    - failing
+    - failed
+    - broken
+    - duplicate
+    - duplicates
+    - missing
+    - mismatch
+    - issue
+    - problem
+    - need to
+    - trying to
+    - help
+    - manual
+  automation_workflows:
+    anchors:
+    - automate
+    - automation
+    - manual
+    - copy paste
+    - copy-paste
+    - data entry
+    - spreadsheet
+    - repetitive
+    triggers:
+    - need
+    - want
+    - trying
+    - how can
+    - how do
+    - can this
+    - takes hours
+    - every day
+    - every week
+    - manually
+    - workflow
+    - script
+    - help
+    - pain
+    - tedious
+  scraping_extraction:
+    anchors:
+    - scrap
+    - crawler
+    - crawl
+    - extract data
+    - data extraction
+    triggers:
+    - need
+    - trying
+    - can't
+    - cannot
+    - stopped
+    - fail
+    - failing
+    - failed
+    - broken
+    - blocked
+    - cloudflare
+    - issue
+    - problem
+    - help
+    - dynamic
+    - pagination
+    - rate limit
+  backend_production:
+    anchors:
+    - backend
+    - fastapi
+    - server
+    - deployment
+    - deploy
+    - celery
+    - cron
+    - database
+    - production
+    triggers:
+    - not working
+    - crash
+    - crashing
+    - fail
+    - failing
+    - failed
+    - error
+    - broken
+    - timeout
+    - connection
+    - issue
+    - problem
+    - help
+    - debug
+    - stopped
+    - '500'
+    - stuck
+  ship_fix_mvp:
+    anchors:
+    - mvp
+    - prototype
+    - launch
+    - production
+    - client
+    - customer
+    triggers:
+    - need help
+    - need someone
+    - blocked
+    - stuck
+    - fix
+    - debug
+    - broken
+    - issue
+    - problem
+    - urgent
+    - asap
+    - deadline
+    - not ready
+    - failing
+    - failed
+rule_max_distance_chars: 180
+intent_grammar:
+  pair_distance_chars: 220
+  context_span_chars: 340
+  technical_concepts:
+    api_failures:
+    - api
+    - apis
+    - api call
+    - api calls
+    - api request
+    - api requests
+    - api response
+    - api responses
+    - rest api
+    - rest endpoint
+    - rest endpoints
+    - endpoint
+    - endpoints
+    - graphql
+    - graphql api
+    - rpc
+    - http api
+    - third party api
+    - third-party api
+    - external api
+    - vendor api
+    - sdk
+    - api client
+    - api integration
+    - rate limit
+    - rate limiting
+    - http request
+    - http response
+    - status code
+    - api key
+    integrations:
+    - integration
+    - integrations
+    - integrate
+    - integrating
+    - connect
+    - connecting
+    - connector
+    - connectors
+    - third party integration
+    - third-party integration
+    - system integration
+    - saas integration
+    - crm integration
+    - payment integration
+    - stripe integration
+    - shopify integration
+    - hubspot integration
+    - salesforce integration
+    - slack integration
+    - notion integration
+    - airtable integration
+    - google sheets integration
+    - zapier
+    - make.com
+    - make integration
+    - n8n
+    - middleware
+    - data bridge
+    - sync between
+    - connect two systems
+    - connect systems
+    webhooks:
+    - webhook
+    - webhooks
+    - web hook
+    - web hooks
+    - callback
+    - callbacks
+    - callback url
+    - event delivery
+    - event notification
+    - signature verification
+    - webhook signature
+    - webhook endpoint
+    - webhook handler
+    auth_oauth:
+    - oauth
+    - oauth2
+    - oauth 2
+    - authentication
+    - authorization
+    - auth flow
+    - login flow
+    - sign in
+    - sign-in
+    - access token
+    - refresh token
+    - bearer token
+    - jwt
+    - jwt token
+    - api key
+    - credentials
+    - client secret
+    - client id
+    - pkce
+    - oidc
+    - openid connect
+    - session token
+    - token refresh
+    - token exchange
+    - auth callback
+    sync_data:
+    - sync
+    - syncing
+    - synchronization
+    - data sync
+    - records
+    - record sync
+    - data import
+    - import
+    - imports
+    - data export
+    - export
+    - exports
+    - csv import
+    - csv export
+    - etl
+    - data pipeline
+    - data transfer
+    - migration
+    - data migration
+    - replication
+    - two way sync
+    - two-way sync
+    - data mismatch
+    - duplicate records
+    - missing records
+    - spreadsheet sync
+    - crm sync
+    - database sync
+    automation_workflows:
+    - automation
+    - automate
+    - automating
+    - workflow
+    - workflows
+    - manual process
+    - manual workflow
+    - manual task
+    - repetitive task
+    - repetitive work
+    - copy paste
+    - copy-paste
+    - data entry
+    - spreadsheet work
+    - spreadsheet update
+    - report generation
+    - reporting
+    - scheduled task
+    - scheduled job
+    - cron
+    - batch job
+    - back office process
+    - ops process
+    - business process
+    - admin task
+    - routine task
+    - recurring task
+    - internal workflow
+    - internal tool
+    scraping_extraction:
+    - scrape
+    - scraping
+    - scraper
+    - scrapers
+    - web scraping
+    - crawler
+    - crawling
+    - crawl
+    - data extraction
+    - extract data
+    - website data
+    - page data
+    - browser automation
+    - playwright
+    - selenium
+    - beautifulsoup
+    - pagination
+    - anti bot
+    - anti-bot
+    - cloudflare
+    - captcha
+    - dynamic website
+    - javascript website
+    - headless browser
+    backend_production:
+    - backend
+    - backend service
+    - api service
+    - fastapi
+    - python backend
+    - server
+    - service
+    - microservice
+    - worker
+    - celery
+    - background task
+    - background job
+    - queue worker
+    - database
+    - postgres
+    - postgresql
+    - sql
+    - redis
+    - deployment
+    - deploy
+    - production
+    - prod
+    - docker
+    - container
+    - serverless
+    - lambda
+    - cloud run
+    - railway
+    - render
+    - uvicorn
+    - gunicorn
+    - database connection
+    - connection pool
+    - scheduled job
+    - cron job
+    ship_fix_mvp:
+    - mvp
+    - prototype
+    - proof of concept
+    - poc
+    - launch
+    - release
+    - go live
+    - go-live
+    - ship
+    - shipping
+    - production ready
+    - productionize
+    - productionise
+    - client project
+    - customer project
+    - beta
+    - pilot
+    - demo
+    - internal tool
+    - admin tool
+    - dashboard
+  help_intents:
+  - need help
+  - need a hand
+  - could use help
+  - could use a hand
+  - looking for help
+  - looking for a hand
+  - need someone
+  - need somebody
+  - looking for someone
+  - looking for somebody
+  - looking for a developer
+  - looking for a dev
+  - looking for an engineer
+  - need a developer
+  - need a dev
+  - need an engineer
+  - need a freelancer
+  - need a contractor
+  - looking for a freelancer
+  - looking for a contractor
+  - can someone help
+  - can somebody help
+  - can anyone help
+  - anyone able to help
+  - anyone available to help
+  - who can help
+  - does anyone know someone
+  - know anyone who can
+  - recommend someone
+  - recommend a developer
+  - help me
+  - help us
+  - help me fix
+  - help us fix
+  - help me build
+  - help us build
+  - help me integrate
+  - help us integrate
+  - need this fixed
+  - need this working
+  - need this sorted
+  - need this solved
+  - need this built
+  - need this finished
+  - need this shipped
+  - need this deployed
+  - someone who can fix
+  - someone who can build
+  - someone who can integrate
+  - somebody who can fix
+  - somebody who can build
+  failure_states:
+  - not working
+  - does not work
+  - doesn't work
+  - wont work
+  - won't work
+  - stopped working
+  - stops working
+  - keeps failing
+  - keep failing
+  - is failing
+  - are failing
+  - fails
+  - failed
+  - failure
+  - broken
+  - breaks
+  - broke
+  - error
+  - errors
+  - throws an error
+  - returning an error
+  - returns an error
+  - crash
+  - crashes
+  - crashing
+  - crashed
+  - timeout
+  - timeouts
+  - timing out
+  - times out
+  - stuck
+  - blocked
+  - blocking
+  - cannot
+  - can't
+  - unable to
+  - struggling with
+  - having trouble
+  - having issues
+  - having problems
+  - issue with
+  - problem with
+  - does not sync
+  - doesn't sync
+  - not syncing
+  - missing events
+  - missing data
+  - duplicate data
+  - duplicates
+  - invalid
+  - rejected
+  - unauthorized
+  - forbidden
+  - rate limited
+  - rate-limited
+  - too many requests
+  - intermittent
+  - flaky
+  - unreliable
+  build_requests:
+  - need to build
+  - want to build
+  - trying to build
+  - need to create
+  - want to create
+  - trying to create
+  - need to integrate
+  - want to integrate
+  - trying to integrate
+  - need to connect
+  - want to connect
+  - trying to connect
+  - need to automate
+  - want to automate
+  - trying to automate
+  - need to sync
+  - want to sync
+  - trying to sync
+  - need to migrate
+  - want to migrate
+  - trying to migrate
+  - need to scrape
+  - want to scrape
+  - trying to scrape
+  - need to extract
+  - want to extract
+  - trying to extract
+  - need to deploy
+  - trying to deploy
+  - need to ship
+  - trying to ship
+  - get this working
+  - get it working
+  - make this work
+  - finish this
+  - complete this
+  - fix this
+  - sort this out
+  - get this into production
+  - move this to production
+  - take this to production
+  - productionize this
+  question_intents:
+  - how do i
+  - how can i
+  - how should i
+  - how do we
+  - how can we
+  - how should we
+  - what is the best way to
+  - best way to
+  - is there a way to
+  - can this be
+  - can i
+  - can we
+  - any idea how to
+  - does anyone know how to
+  - anyone know how to
+  - what would you use to
+  - how would you
+  - how would we
+  - where can i find someone
+  - where can we find someone
+  - who should i hire
+  - who should we hire
+  commercial_intents:
+  - willing to pay
+  - happy to pay
+  - can pay
+  - we can pay
+  - i can pay
+  - pay someone
+  - pay a developer
+  - paid help
+  - paid task
+  - paid project
+  - paid work
+  - paid gig
+  - paid contract
+  - budget for
+  - our budget
+  - my budget
+  - have a budget
+  - budget available
+  - fixed price
+  - hourly rate
+  - day rate
+  - contract work
+  - contract role
+  - freelance work
+  - freelance project
+  - contractor needed
+  - freelancer needed
+  - bounty
+  - paid bounty
+  - cash bounty
+  - reward for fixing
+  ownership_terms:
+  - my
+  - our
+  - we
+  - we are
+  - we are using
+  - we use
+  - we have
+  - we run
+  - we operate
+  - i am
+  - i am using
+  - i use
+  - i have
+  - i run
+  - my team
+  - our team
+  - my company
+  - our company
+  - my business
+  - our business
+  - my startup
+  - our startup
+  - my app
+  - our app
+  - my product
+  - our product
+  - my service
+  - our service
+  - my client
+  - our client
+  - my customer
+  - our customer
+  business_terms:
+  - our company
+  - my company
+  - our business
+  - my business
+  - our startup
+  - my startup
+  - our team
+  - my team
+  - our client
+  - my client
+  - our clients
+  - my clients
+  - our customer
+  - my customer
+  - our customers
+  - paying customer
+  - paying customers
+  - our users
+  - our product
+  - our service
+  - our app
+  - production
+  - in production
+  - live users
+  - customer is waiting
+  - customers are waiting
+  - client is waiting
+  - clients are waiting
+  manual_process_terms:
+  - doing this manually
+  - do this manually
+  - done manually
+  - manual process
+  - manual workflow
+  - manual task
+  - manual data entry
+  - manually entering
+  - manually copying
+  - copying by hand
+  - copy paste
+  - copy-paste
+  - copying data
+  - spreadsheet every day
+  - spreadsheet every week
+  - update the spreadsheet
+  - updating spreadsheets
+  - download and upload
+  - export and import
+  - export then import
+  - rekeying data
+  - re-entering data
+  - entering data by hand
+  manual_pain_terms:
+  - takes hours
+  - takes too long
+  - time consuming
+  - time-consuming
+  - tedious
+  - repetitive
+  - every day
+  - every week
+  - every monday
+  - every month
+  - waste of time
+  - wasting time
+  - hate doing
+  - tired of
+  - sick of
+  - painful
+  - annoying
+  - error prone
+  - error-prone
+  - keeps getting missed
+  - lots of mistakes
+  - too much manual work
+  - scales poorly
