@@ -511,3 +511,40 @@ python -m lead_radar lead-action --id YOUR_ID --action reset --yes
 ```
 
 `reset` only removes manual funnel actions/revenue for that opportunity. It preserves the opportunity, matches, LLM classification, lead brief, and notification history.
+
+## Phase 7B: adaptive source/query advisor (dry-run only)
+
+Lead Radar can now turn the Phase 7A funnel/ROI data into conservative source and query recommendations without changing any configuration, polling schedule, query rotation, or LLM budget.
+
+Source-level advice:
+
+```powershell
+python -m lead_radar optimize --days 30
+```
+
+Query/feed/category advice:
+
+```powershell
+python -m lead_radar optimize --days 30 --by query
+python -m lead_radar optimize --days 30 --by query --source github
+```
+
+Possible recommendations are:
+
+- `BOOST` — strong downstream evidence; currently requires multiple wins or substantial reply/proposal evidence;
+- `KEEP` — useful signal or a single win, but not enough evidence to increase allocation automatically;
+- `WATCH` — mixed/weak discovery signal without enough negative evidence to reduce priority;
+- `DEPRIORITIZE` — enough evidence that the segment consumes attention without producing useful signal;
+- `DISABLE_CANDIDATE` — very large zero-signal sample; advisory only, never an automatic disable;
+- `INSUFFICIENT_DATA` — fewer than 20 observed leads, regardless of an exciting individual outcome.
+
+Safeguards are intentionally conservative:
+
+- fewer than 20 observed leads always remains `INSUFFICIENT_DATA`;
+- one recorded win can move a segment to `KEEP`, but cannot make it `BOOST`;
+- replies/proposals/wins outweigh raw lead volume;
+- large zero-P0/P1 samples can be deprioritized, but source-level disable advice requires a much larger sample than query-level advice;
+- P0/P1 discovery yield alone can justify `KEEP`, not `BOOST`;
+- the command is a pure advisor. It never rewrites `.env`, YAML, query lists, polling intervals, source enable flags, or LLM budgets.
+
+Every run ends with an explicit dry-run message so recommendations cannot be confused with applied changes. Adaptive scheduling and automatic budget/query weighting should only be enabled later, after enough real `contacted -> replied -> proposal -> won/lost` outcomes have accumulated.

@@ -9,6 +9,7 @@ from pathlib import Path
 from .app import RadarApp
 from .config import load_settings
 from .llm import LLMAPIError, LLMBudgetExceeded
+from .optimizer import advise_roi
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     roi.add_argument("--days", type=int, default=30)
     roi.add_argument("--by", choices=("source", "query"), default="source")
     roi.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
+    optimize = sub.add_parser("optimize", help="Recommend source/query priorities without changing configuration")
+    optimize.add_argument("--days", type=int, default=30)
+    optimize.add_argument("--by", choices=("source", "query"), default="source")
+    optimize.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -147,6 +152,33 @@ async def async_main(args: argparse.Namespace) -> int:
                 f"won={roi_row['won']} lost={roi_row['lost']} ignored={roi_row['ignored']} "
                 f"revenue=${_number(roi_row['revenue']):.2f} llm=${_number(roi_row['llm_cost']):.6f}"
             )
+        return 0
+    if args.command == "optimize":
+        sources = tuple(args.sources) if args.sources else None
+        by_query = args.by == "query"
+        roi_rows = app.db.roi_report(days=args.days, by_query=by_query, sources=sources)
+        if not roi_rows:
+            print("No ROI data in the selected window.")
+            return 0
+        advice = advise_roi(roi_rows, by_query=by_query)
+        print(f"Optimizer advisor: {args.days}d | by={args.by} | dry_run=true")
+        for optimization_item in advice:
+            label = (
+                optimization_item.source
+                if not by_query
+                else f"{optimization_item.source}:{optimization_item.key}"
+            )
+            print(
+                f"{label} recommendation={optimization_item.recommendation.value} "
+                f"confidence={optimization_item.confidence.value} "
+                f"leads={optimization_item.leads} actionable={optimization_item.actionable} "
+                f"rate={optimization_item.actionable_rate:.2%} "
+                f"contacted={optimization_item.contacted} replied={optimization_item.replied} "
+                f"proposal={optimization_item.proposal} won={optimization_item.won} "
+                f"revenue=${optimization_item.revenue:.2f} llm=${optimization_item.llm_cost:.6f}"
+            )
+            print(f"  reason: {optimization_item.reason}")
+        print("Dry-run only: no source, query, schedule, or budget setting was changed.")
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())
