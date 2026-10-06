@@ -29,6 +29,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("llm-stats", help="Show LLM token/cost budget usage")
     prepare = sub.add_parser("prepare", help="Generate or show an action brief and outreach draft for one lead")
     prepare.add_argument("--id", type=int, required=True, dest="opportunity_id")
+    action = sub.add_parser("lead-action", help="Record outreach/reply/proposal/win/loss feedback for one lead")
+    action.add_argument("--id", type=int, required=True, dest="opportunity_id")
+    action.add_argument(
+        "--action",
+        required=True,
+        choices=("contacted", "replied", "proposal", "won", "lost", "ignored", "new", "reset"),
+    )
+    action.add_argument("--revenue", type=float, default=None, help="Revenue in USD; normally used with --action won")
+    action.add_argument("--note", default=None, help="Optional short note stored in the action history")
+    action.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm destructive --action reset",
+    )
+    roi = sub.add_parser("roi", help="Show source/query funnel and revenue performance")
+    roi.add_argument("--days", type=int, default=30)
+    roi.add_argument("--by", choices=("source", "query"), default="source")
+    roi.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -49,6 +67,19 @@ def _age_label(created_at: str) -> str:
         return f"{seconds // 3600}h"
     return f"{seconds // 86400}d"
 
+
+
+
+def _number(value: object | None) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, (str, bytes, bytearray)):
+        return float(value)
+    raise TypeError(f"Cannot convert {type(value).__name__} to number")
 
 async def async_main(args: argparse.Namespace) -> int:
     settings = load_settings(Path.cwd())
@@ -75,6 +106,47 @@ async def async_main(args: argparse.Namespace) -> int:
         return 0
     if args.command == "stats":
         print(app.db.stats())
+        return 0
+    if args.command == "lead-action":
+        try:
+            if args.action == "reset":
+                if args.revenue is not None:
+                    raise ValueError("--revenue cannot be used with --action reset")
+                if not args.yes:
+                    print("Refusing to reset feedback without --yes.")
+                    return 2
+                app.db.reset_feedback(args.opportunity_id)
+                print(f"#{args.opportunity_id} feedback reset -> new")
+                return 0
+            app.db.set_status(
+                args.opportunity_id,
+                args.action,
+                reason=args.note or "cli",
+                revenue=args.revenue,
+            )
+        except ValueError as exc:
+            print(str(exc))
+            return 2
+        suffix = f" revenue=${args.revenue:.2f}" if args.revenue is not None else ""
+        print(f"#{args.opportunity_id} -> {args.action}{suffix}")
+        return 0
+    if args.command == "roi":
+        sources = tuple(args.sources) if args.sources else None
+        roi_rows = app.db.roi_report(days=args.days, by_query=args.by == "query", sources=sources)
+        if not roi_rows:
+            print("No ROI data in the selected window.")
+            return 0
+        print(f"ROI window: {args.days}d | by={args.by}")
+        for roi_row in roi_rows:
+            label = str(roi_row["source"]) if args.by == "source" else f"{roi_row['source']}:{roi_row['key']}"
+            fetched = roi_row.get("fetched")
+            fetch_part = f" fetched={fetched}" if fetched is not None else ""
+            print(
+                f"{label}{fetch_part} leads={roi_row['leads']} p0={roi_row['p0']} p1={roi_row['p1']} "
+                f"contacted={roi_row['contacted']} replied={roi_row['replied']} proposal={roi_row['proposal']} "
+                f"won={roi_row['won']} lost={roi_row['lost']} ignored={roi_row['ignored']} "
+                f"revenue=${_number(roi_row['revenue']):.2f} llm=${_number(roi_row['llm_cost']):.6f}"
+            )
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())
@@ -135,19 +207,19 @@ async def async_main(args: argparse.Namespace) -> int:
         return 0
     if args.command == "shortlist":
         sources = tuple(args.sources) if args.sources else None
-        rows = app.db.shortlist(args.limit, sources)
-        if not rows:
+        shortlist_rows = app.db.shortlist(args.limit, sources)
+        if not shortlist_rows:
             print("No actionable P0/P1 opportunities in the current shortlist.")
             return 0
-        for row in rows:
+        for shortlist_row in shortlist_rows:
             print(
-                f"#{row['id']} [{row['alert_class']}] priority={row['priority_score']} "
-                f"cash={row['cash_score']} value={row['value_score']} rel={row['relationship_score']} "
-                f"fresh={row['freshness_score']} comp={row['competition_score']} age={_age_label(row['created_at'])} "
-                f"llm={row['llm_decision']} conf={row['llm_confidence'] if row['llm_confidence'] is not None else '-'}\n"
-                f"  {row['author_type']} / {row['commercial_intent']} / {row['opportunity_class']} "
-                f"[{row['source']}] {row['title']}\n"
-                f"  {row['url']}"
+                f"#{shortlist_row['id']} [{shortlist_row['alert_class']}] priority={shortlist_row['priority_score']} "
+                f"cash={shortlist_row['cash_score']} value={shortlist_row['value_score']} rel={shortlist_row['relationship_score']} "
+                f"fresh={shortlist_row['freshness_score']} comp={shortlist_row['competition_score']} age={_age_label(str(shortlist_row['created_at']))} "
+                f"llm={shortlist_row['llm_decision']} conf={shortlist_row['llm_confidence'] if shortlist_row['llm_confidence'] is not None else '-'}\n"
+                f"  {shortlist_row['author_type']} / {shortlist_row['commercial_intent']} / {shortlist_row['opportunity_class']} "
+                f"[{shortlist_row['source']}] {shortlist_row['title']}\n"
+                f"  {shortlist_row['url']}"
             )
         return 0
     if args.command == "reclassify":
@@ -155,11 +227,11 @@ async def async_main(args: argparse.Namespace) -> int:
         print(app.reclassify_stored(sources))
         return 0
     if args.command == "recent":
-        for row in app.db.recent(args.limit):
+        for recent_row in app.db.recent(args.limit):
             print(
-                f"#{row['id']} [{row['alert_class']}] cash={row['cash_score']} value={row['value_score']} "
-                f"rel={row['relationship_score']} author={row['author_type']} intent={row['commercial_intent']} "
-                f"[{row['source']}] {row['title']}\n  {row['url']}\n  status={row['status']} created={row['created_at']}"
+                f"#{recent_row['id']} [{recent_row['alert_class']}] cash={recent_row['cash_score']} value={recent_row['value_score']} "
+                f"rel={recent_row['relationship_score']} author={recent_row['author_type']} intent={recent_row['commercial_intent']} "
+                f"[{recent_row['source']}] {recent_row['title']}\n  {recent_row['url']}\n  status={recent_row['status']} created={recent_row['created_at']}"
             )
         return 0
     if args.command == "telegram-id":

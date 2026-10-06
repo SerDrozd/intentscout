@@ -465,3 +465,49 @@ Phase 6A adds two no-credential discovery sensors while keeping the existing det
 - `bluesky`: public `app.bsky.feed.searchPosts` queries against the Bluesky AppView. Query families rotate across cycles and only fresh local-lookback results are emitted. No Bluesky account or token is required.
 
 HubSpot public-page polling is disabled by default after repeatable HTTP 403 responses from the local client. It remains available behind `HUBSPOT_ENABLED=true` for future experiments, but it no longer wastes time or logs warnings in the normal loop.
+
+## Phase 7A: feedback and ROI tracking
+
+Lead Radar now stores collector run metrics and can track the sales outcome of each opportunity.
+This turns the system from a one-way detector into a measurable acquisition loop.
+
+Record actions from the CLI:
+
+```powershell
+python -m lead_radar lead-action --id YOUR_ID --action contacted --note "public reply"
+python -m lead_radar lead-action --id YOUR_ID --action replied
+python -m lead_radar lead-action --id YOUR_ID --action proposal
+python -m lead_radar lead-action --id YOUR_ID --action won --revenue 250
+```
+
+Supported stages are `new`, `contacted`, `replied`, `proposal`, `won`, `lost`, and `ignored`.
+Telegram alerts also expose `Replied` and `Won` buttons in addition to `Ignore` and `Contacted`.
+
+Source-level ROI for the last 30 days:
+
+```powershell
+python -m lead_radar roi --days 30
+```
+
+Query/feed/category attribution:
+
+```powershell
+python -m lead_radar roi --days 30 --by query
+python -m lead_radar roi --days 30 --by query --source bluesky
+```
+
+The report shows lead volume, P0/P1 counts, contacted/replied/proposal/won/lost/ignored stages,
+recorded revenue, collector fetched volume (source view), and attributable LLM cost for requests
+made after this phase was installed. Query attribution uses `query_family`, `broad_query`,
+`feed_key`, or `category_key` from opportunity metadata.
+
+
+### Undo accidental feedback
+
+If a feedback command was run by mistake, remove the manually recorded funnel history and reset the lead to `new`:
+
+```powershell
+python -m lead_radar lead-action --id YOUR_ID --action reset --yes
+```
+
+`reset` only removes manual funnel actions/revenue for that opportunity. It preserves the opportunity, matches, LLM classification, lead brief, and notification history.

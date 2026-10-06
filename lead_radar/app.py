@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from time import perf_counter
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -274,6 +275,7 @@ class RadarApp:
                 cache_write_tokens=usage.cache_write_tokens,
                 output_tokens=usage.output_tokens,
                 estimated_cost_usd=usage.estimated_cost_usd,
+                opportunity_ids=[opportunity_id for opportunity_id, _ in batch],
             )
             for classification in classifications:
                 self.db.save_llm_classification(
@@ -342,6 +344,7 @@ class RadarApp:
             cache_write_tokens=usage.cache_write_tokens,
             output_tokens=usage.output_tokens,
             estimated_cost_usd=usage.estimated_cost_usd,
+            opportunity_ids=[opportunity_id],
         )
         self.db.save_lead_brief(brief, model=self.settings.llm_model)
         return brief
@@ -548,14 +551,33 @@ class RadarApp:
             log.warning("Telegram callback polling failed: %s", exc)
 
         for collector in self.collectors():
+            source = str(getattr(collector, "name", type(collector).__name__))
+            started = perf_counter()
+            matched_before = stats.matched
+            inserted_before = stats.inserted
+            excluded_before = stats.excluded
+            fetched = 0
+            error: str | None = None
             try:
                 items = await collector.collect()
-                stats.fetched += len(items)
-                log.info("%s fetched %s item(s)", collector.name, len(items))
+                fetched = len(items)
+                stats.fetched += fetched
+                log.info("%s fetched %s item(s)", source, fetched)
                 for item in items:
                     await self.process(item, stats, pending_alerts)
-            except Exception:
-                log.exception("Collector %s failed", getattr(collector, "name", type(collector).__name__))
+            except Exception as exc:
+                error = type(exc).__name__
+                log.exception("Collector %s failed", source)
+            finally:
+                self.db.record_collector_run(
+                    source=source,
+                    fetched=fetched,
+                    matched=stats.matched - matched_before,
+                    inserted=stats.inserted - inserted_before,
+                    excluded=stats.excluded - excluded_before,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    error=error,
+                )
 
         await self._auto_classify_review_candidates(stats)
         pending_alerts = await self._llm_filter_pending(pending_alerts, stats)
