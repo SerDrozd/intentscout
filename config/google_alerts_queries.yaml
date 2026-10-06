@@ -1,0 +1,54 @@
+# Suggested Google Alerts query pack for buyer-intent discovery.
+# This file is documentation/configuration aid only: Lead Radar never creates
+# Google Alerts or guesses private feed URLs. Create the alert in your Google
+# account, choose RSS delivery, then copy its real feed URL into config/feeds.yaml.
+alerts:
+  - key: looking_developer_api
+    query: '"looking for developer" API'
+    feed_key: google_alerts_looking_developer_api
+    category_kind: marketplace
+
+  - key: need_developer_webhook
+    query: '"need a developer" webhook'
+    feed_key: google_alerts_need_developer_webhook
+    category_kind: marketplace
+
+  - key: freelancer_automation
+    query: '"looking for freelancer" automation'
+    feed_key: google_alerts_freelancer_automation
+    category_kind: marketplace
+
+  - key: contractor_python
+    query: '"need contractor" Python'
+    feed_key: google_alerts_contractor_python
+    category_kind: marketplace
+
+  - key: willing_pay_api
+    query: '"willing to pay" API'
+    feed_key: google_alerts_willing_pay_api
+    category_kind: business_pain
+
+  - key: manual_process_automation
+    query: '"manual process" automation'
+    feed_key: google_alerts_manual_process_automation
+    category_kind: business_pain
+
+  - key: hubspot_webhook_help
+    query: '"need help" HubSpot webhook'
+    feed_key: google_alerts_hubspot_webhook_help
+    category_kind: business_pain
+
+  - key: make_automation_help
+    query: '"need help" "Make.com" automation'
+    feed_key: google_alerts_make_automation_help
+    category_kind: business_pain
+
+  - key: n8n_developer
+    query: 'n8n "looking for" developer'
+    feed_key: google_alerts_n8n_developer
+    category_kind: marketplace
+
+  - key: shopify_webhook_developer
+    query: 'Shopify webhook developer'
+    feed_key: google_alerts_shopify_webhook_developer
+    category_kind: business_pain

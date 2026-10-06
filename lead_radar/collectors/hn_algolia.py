@@ -46,14 +46,19 @@ class HackerNewsAlgoliaCollector:
         results_per_query: int = 50,
         queries_per_cycle: int = 6,
         overlap_seconds: int = 300,
+        query_keys: tuple[str, ...] | None = None,
     ) -> None:
         self.db = db
         self.lookback_hours = max(1, lookback_hours)
         self.results_per_query = max(1, min(100, results_per_query))
         self.queries_per_cycle = max(1, min(len(QUERY_FAMILIES), queries_per_cycle))
         self.overlap_seconds = max(0, overlap_seconds)
+        self.query_keys = query_keys
 
     def _selected_queries(self) -> tuple[HNQueryFamily, ...]:
+        if self.query_keys is not None:
+            wanted = set(self.query_keys)
+            return tuple(family for family in QUERY_FAMILIES if family.key in wanted)
         raw = self.db.get_state("hn_algolia_query_index")
         try:
             start = int(raw) if raw is not None else 0

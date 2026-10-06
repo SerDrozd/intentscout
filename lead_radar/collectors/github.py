@@ -24,10 +24,17 @@ BROAD_QUERIES = [
 class GitHubCollector:
     name = "github"
 
-    def __init__(self, token: str | None, lookback_hours: int = 24, results_per_query: int = 50) -> None:
+    def __init__(
+        self,
+        token: str | None,
+        lookback_hours: int = 24,
+        results_per_query: int = 50,
+        queries: tuple[str, ...] | None = None,
+    ) -> None:
         self.token = token
         self.lookback_hours = lookback_hours
         self.results_per_query = max(1, min(100, results_per_query))
+        self.queries = queries or tuple(BROAD_QUERIES)
 
     async def collect(self) -> list[Opportunity]:
         since = (datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)).date().isoformat()
@@ -42,7 +49,7 @@ class GitHubCollector:
         timeout = httpx.Timeout(25.0)
         out: dict[str, Opportunity] = {}
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-            for broad in BROAD_QUERIES:
+            for broad in self.queries:
                 query = f"{broad} is:issue is:open created:>={since}"
                 try:
                     r = await client.get(

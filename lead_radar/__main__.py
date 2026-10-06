@@ -52,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--days", type=int, default=30)
     optimize.add_argument("--by", choices=("source", "query"), default="source")
     optimize.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
+    schedule_plan = sub.add_parser("schedule-plan", help="Preview safe adaptive polling/query allocation")
+    schedule_plan.add_argument("--days", type=int, default=None, help="ROI window; defaults to ADAPTIVE_WINDOW_DAYS")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -179,6 +181,25 @@ async def async_main(args: argparse.Namespace) -> int:
             )
             print(f"  reason: {optimization_item.reason}")
         print("Dry-run only: no source, query, schedule, or budget setting was changed.")
+        return 0
+    if args.command == "schedule-plan":
+        rows = app.adaptive_schedule_rows(days=args.days)
+        window_days = args.days or settings.adaptive_window_days
+        print(
+            f"Adaptive schedule preview: {window_days}d | enabled={str(settings.adaptive_scheduling_enabled).lower()} "
+            "| in_memory=true | permanent_disable=false"
+        )
+        for schedule_row in rows:
+            query_part = ""
+            if schedule_row["query_limit"] is not None:
+                query_part = f" queries={schedule_row['query_limit']}/{schedule_row['query_available']}"
+            print(
+                f"{schedule_row['source']} recommendation={schedule_row['recommendation']} "
+                f"confidence={schedule_row['confidence']} poll_every={schedule_row['interval_cycles']} cycle(s)"
+                f"{query_part}"
+            )
+            print(f"  reason: {schedule_row['reason']}")
+        print("Preview only: no .env/YAML/source-enable setting was changed.")
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())

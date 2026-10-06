@@ -22,6 +22,7 @@ from .collectors import (
     ShopifyCommunityCollector,
     ZapierWebCollector,
 )
+from .adaptive import AdaptiveScheduler
 from .commercial import assess_commercial
 from .config import Settings, load_keyword_config
 from .database import Database
@@ -29,6 +30,9 @@ from .llm import CLASSIFIER_SCHEMA_VERSION, LLMAPIError, LLMBudgetExceeded, Open
 from .matcher import Matcher
 from .models import LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
 from .scoring import score
+from .collectors.bluesky import QUERY_FAMILIES as BLUESKY_QUERY_FAMILIES
+from .collectors.github import BROAD_QUERIES as GITHUB_BROAD_QUERIES
+from .collectors.hn_algolia import QUERY_FAMILIES as HN_QUERY_FAMILIES
 from .telegram import TelegramAPIError, TelegramClient
 
 
@@ -64,6 +68,12 @@ class RadarApp:
             coverage["pair_variant_equivalents"],
         )
         self.telegram = TelegramClient(settings.telegram_bot_token, settings.telegram_chat_id, self.db)
+        self._cycle_index = 0
+        self.adaptive = AdaptiveScheduler(
+            enabled=settings.adaptive_scheduling_enabled,
+            window_days=settings.adaptive_window_days,
+            refresh_cycles=settings.adaptive_refresh_cycles,
+        )
         self.llm = OpenAILeadClassifier(
             api_key=settings.openai_api_key if settings.llm_enabled else None,
             model=settings.llm_model,
@@ -75,13 +85,79 @@ class RadarApp:
             output_price_per_mtok=settings.llm_output_price_per_mtok,
         )
 
+    def _refresh_adaptive(self, *, force: bool = False, days: int | None = None) -> None:
+        if not self.settings.adaptive_scheduling_enabled:
+            return
+        if not force and not self.adaptive.needs_refresh(self._cycle_index):
+            return
+        window_days = days or self.settings.adaptive_window_days
+        source_rows = self.db.roi_report(days=window_days, by_query=False)
+        query_rows = self.db.roi_report(days=window_days, by_query=True)
+        self.adaptive.refresh(source_rows, query_rows, cycle_index=self._cycle_index)
+
+    @staticmethod
+    def _adaptive_source_name(collector_name: str) -> str:
+        if collector_name in {"hn_algolia", "hackernews"}:
+            return "hackernews"
+        return collector_name
+
+    def adaptive_schedule_rows(self, *, days: int | None = None) -> list[dict[str, object]]:
+        self._refresh_adaptive(force=True, days=days)
+        query_specs = {
+            "hackernews": (self.settings.hn_algolia_queries_per_cycle, len(HN_QUERY_FAMILIES)),
+            "bluesky": (self.settings.bluesky_queries_per_cycle, len(BLUESKY_QUERY_FAMILIES)),
+            "github": (len(GITHUB_BROAD_QUERIES), len(GITHUB_BROAD_QUERIES)),
+        }
+        sources = (
+            "hackernews", "bluesky", "rss", "github", "make", "n8n",
+            "shopify", "bubble", "airtable", "zapier",
+        )
+        rows: list[dict[str, object]] = []
+        for source in sources:
+            plan = self.adaptive.source_plan(source)
+            base_limit, available = query_specs.get(source, (0, 0))
+            query_limit = self.adaptive.query_limit(source, base_limit, available) if available else None
+            rows.append({
+                "source": source,
+                "recommendation": plan.recommendation.value,
+                "confidence": plan.confidence.value,
+                "interval_cycles": plan.interval_cycles,
+                "query_limit": query_limit,
+                "query_available": available or None,
+                "reason": plan.reason,
+            })
+        return rows
+
     def collectors(self):
+        hn_query_keys: tuple[str, ...] | None = None
+        bluesky_query_keys: tuple[str, ...] | None = None
+        github_queries: tuple[str, ...] | None = None
+        if self.settings.adaptive_scheduling_enabled:
+            hn_query_keys = self.adaptive.select_query_keys(
+                "hackernews",
+                tuple(item.key for item in HN_QUERY_FAMILIES),
+                base_limit=self.settings.hn_algolia_queries_per_cycle,
+                cycle_index=self._cycle_index,
+            )
+            bluesky_query_keys = self.adaptive.select_query_keys(
+                "bluesky",
+                tuple(item.key for item in BLUESKY_QUERY_FAMILIES),
+                base_limit=self.settings.bluesky_queries_per_cycle,
+                cycle_index=self._cycle_index,
+            )
+            github_queries = self.adaptive.select_query_keys(
+                "github",
+                tuple(GITHUB_BROAD_QUERIES),
+                base_limit=len(GITHUB_BROAD_QUERIES),
+                cycle_index=self._cycle_index,
+            )
         if self.settings.hn_algolia_enabled:
             yield HackerNewsAlgoliaCollector(
                 self.db,
                 lookback_hours=self.settings.hn_algolia_lookback_hours,
                 results_per_query=self.settings.hn_algolia_results_per_query,
                 queries_per_cycle=self.settings.hn_algolia_queries_per_cycle,
+                query_keys=hn_query_keys,
             )
         if self.settings.hn_enabled:
             yield HackerNewsCollector(
@@ -96,6 +172,7 @@ class RadarApp:
                 lookback_hours=self.settings.bluesky_lookback_hours,
                 results_per_query=self.settings.bluesky_results_per_query,
                 queries_per_cycle=self.settings.bluesky_queries_per_cycle,
+                query_keys=bluesky_query_keys,
             )
         if self.settings.rss_enabled:
             yield RSSCollector(
@@ -108,6 +185,7 @@ class RadarApp:
                 self.settings.github_token,
                 lookback_hours=self.settings.github_lookback_hours,
                 results_per_query=self.settings.github_results_per_query,
+                queries=github_queries,
             )
         if self.settings.make_enabled:
             yield MakeCommunityCollector(
@@ -550,8 +628,22 @@ class RadarApp:
         except TelegramAPIError as exc:
             log.warning("Telegram callback polling failed: %s", exc)
 
+        self._refresh_adaptive()
         for collector in self.collectors():
             source = str(getattr(collector, "name", type(collector).__name__))
+            adaptive_source = self._adaptive_source_name(source)
+            if self.settings.adaptive_scheduling_enabled and not self.adaptive.should_run(
+                adaptive_source, self._cycle_index
+            ):
+                plan = self.adaptive.source_plan(adaptive_source)
+                log.info(
+                    "%s adaptive-skip cycle=%s recommendation=%s poll_every=%s",
+                    source,
+                    self._cycle_index,
+                    plan.recommendation.value,
+                    plan.interval_cycles,
+                )
+                continue
             started = perf_counter()
             matched_before = stats.matched
             inserted_before = stats.inserted
@@ -582,6 +674,7 @@ class RadarApp:
         await self._auto_classify_review_candidates(stats)
         pending_alerts = await self._llm_filter_pending(pending_alerts, stats)
         await self._send_pending_alerts(pending_alerts, stats)
+        self._cycle_index += 1
         return stats
 
     async def run_forever(self) -> None:

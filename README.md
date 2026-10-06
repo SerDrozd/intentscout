@@ -548,3 +548,42 @@ Safeguards are intentionally conservative:
 - the command is a pure advisor. It never rewrites `.env`, YAML, query lists, polling intervals, source enable flags, or LLM budgets.
 
 Every run ends with an explicit dry-run message so recommendations cannot be confused with applied changes. Adaptive scheduling and automatic budget/query weighting should only be enabled later, after enough real `contacted -> replied -> proposal -> won/lost` outcomes have accumulated.
+
+## Phase 8A: safe adaptive scheduling + Google Alerts query pack
+
+Phase 7B remains the source of truth for recommendations, but continuous `run` mode can now use those recommendations as **reversible in-memory scheduling hints**. The scheduler never edits `.env`, YAML, source enable flags, or LLM budgets, and it never permanently disables a source/query.
+
+Defaults:
+
+```env
+ADAPTIVE_SCHEDULING_ENABLED=true
+ADAPTIVE_WINDOW_DAYS=30
+ADAPTIVE_REFRESH_CYCLES=10
+```
+
+Preview the current runtime plan without collecting anything:
+
+```powershell
+python -m lead_radar schedule-plan
+```
+
+The conservative cadence mapping is:
+
+- `BOOST`, `KEEP`, `INSUFFICIENT_DATA`: poll every cycle;
+- `WATCH`: every 2 cycles;
+- `DEPRIORITIZE`: every 3 cycles;
+- `DISABLE_CANDIDATE`: every 8 cycles, never permanently disabled.
+
+For query-driven collectors (`hn_algolia`, Bluesky, GitHub), the same advice also reduces or expands the number of queries run per scheduled cycle. Unknown or low-sample queries keep a normal exploration weight, so new query families are not starved before they gather evidence. Even a `DISABLE_CANDIDATE` query retains a non-zero exploration slot.
+
+This behavior matters only inside a long-running process. A fresh `python -m lead_radar once` starts at cycle zero, so every enabled source still gets a chance to run; query-heavy sources may use the safer adaptive query budget immediately.
+
+To return to the old fixed schedule at any time:
+
+```env
+ADAPTIVE_SCHEDULING_ENABLED=false
+```
+
+### Google Alerts query pack
+
+`config/google_alerts_queries.yaml` contains buyer-intent alert suggestions, but Lead Radar does not create alerts or invent account-specific RSS URLs. Create an alert yourself, choose RSS delivery, then add the real feed URL to `config/feeds.yaml` using the existing RSS collector. No Python code is required.

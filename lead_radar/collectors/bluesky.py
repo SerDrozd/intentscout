@@ -49,13 +49,18 @@ class BlueskyCollector:
         lookback_hours: int = 24,
         results_per_query: int = 25,
         queries_per_cycle: int = 6,
+        query_keys: tuple[str, ...] | None = None,
     ) -> None:
         self.db = db
         self.lookback_hours = max(1, lookback_hours)
         self.results_per_query = max(1, min(100, results_per_query))
         self.queries_per_cycle = max(1, min(len(QUERY_FAMILIES), queries_per_cycle))
+        self.query_keys = query_keys
 
     def _selected_queries(self) -> tuple[BlueskyQueryFamily, ...]:
+        if self.query_keys is not None:
+            wanted = set(self.query_keys)
+            return tuple(family for family in QUERY_FAMILIES if family.key in wanted)
         raw = self.db.get_state("bluesky_query_index")
         try:
             start = int(raw) if raw is not None else 0
