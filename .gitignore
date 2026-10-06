@@ -8,11 +8,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-data/*.db
-data/*.db-*
-*.sqlite
-*.sqlite3
-
 *.db
 *.db-*
+*.sqlite
+*.sqlite3
 data-v1.1-noise/

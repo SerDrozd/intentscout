@@ -52,6 +52,33 @@ BUYER_HELP_TERMS = (
     "developer needed",
 )
 
+
+GITHUB_DIRECT_BUYER_TERMS = (
+    "willing to pay",
+    "happy to pay",
+    "we can pay someone",
+    "i can pay someone",
+    "budget for this",
+    "budget available for this",
+    "looking for a contractor",
+    "need a contractor",
+    "contractor needed",
+    "looking for a freelancer",
+    "need a freelancer",
+    "freelancer needed",
+    "looking for someone to fix",
+    "need someone to fix",
+    "looking for someone to build",
+    "need someone to build",
+    "looking for someone to help",
+    "need someone to help",
+    "paid bounty",
+    "bounty available",
+    "cash bounty",
+    "commission available",
+    "paid task available",
+)
+
 SELLER_TERMS = (
     "open to work",
     "open to contract work",
@@ -67,6 +94,14 @@ SELLER_TERMS = (
     "hire me",
     "my resume",
     "my résumé",
+    "looking for opportunities",
+    "looking for automation opportunities",
+    "looking for projects",
+    "looking for real-world projects",
+    "open to project-based work",
+    "open to project based work",
+    "open to projects",
+    "gain commercial experience",
 )
 
 SERVICE_PROVIDER_TERMS = (
@@ -105,6 +140,102 @@ HN_JOB_MARKERS = (
     "software engineer",
     "machine learning engineer",
     "job opening",
+)
+
+COMMUNITY_EMPLOYMENT_MARKERS = (
+    "full-time",
+    "full time",
+    "part-time employee",
+    "salary",
+    "annual salary",
+    "benefits",
+    "submit your resume",
+    "send your resume",
+    "send cv",
+    "apply here",
+    "apply at",
+    "employment",
+)
+
+
+VENDOR_PROMO_MARKERS = (
+    "i'm part of the",
+    "i am part of the",
+    "our product",
+    "our platform",
+    "our tool",
+    "we make",
+    "we built",
+    "pricing note",
+    "free trial",
+    "api reference",
+    "docs:",
+    "documentation:",
+    "what it is",
+    "i'd like your feedback",
+    "i would like your feedback",
+)
+
+JOB_STRUCTURE_MARKERS = (
+    "about the role",
+    "requirements",
+    "how to apply",
+    "application form",
+    "reviewing all applications",
+    "reviewing applications",
+    "evaluating candidates",
+    "interview date",
+    "interview",
+    "weekly availability",
+    "hourly availability",
+    "core leadership role",
+)
+
+RECRUITER_REPLY_MARKERS = (
+    "thank you for your application",
+    "reviewing all applications",
+    "reviewing applications",
+    "evaluating candidates",
+    "next stage",
+    "interview date",
+    "interview",
+    "confirm where you are currently based",
+    "application form",
+)
+
+COMMUNITY_PROJECT_MARKERS = (
+    "freelance",
+    "freelancer",
+    "contractor",
+    "contract work",
+    "project-based",
+    "project based",
+    "fixed-price",
+    "fixed price",
+    "flat fee",
+    "paid test",
+    "short-term",
+    "short term",
+    "1099",
+    "consultant",
+)
+
+FRESH_BUYER_UPDATE_TERMS = (
+    "still looking",
+    "still need someone",
+    "we still need",
+    "i still need",
+    "happy to pay",
+    "willing to pay",
+    "budget is",
+    "budget available",
+    "dm me",
+    "send me a dm",
+    "contractor dropped",
+    "contractor disappeared",
+    "developer disappeared",
+    "previous developer left",
+    "deadline is",
 )
 
 LEARNER_TERMS = (
@@ -156,7 +287,10 @@ AGENCY_RELATIONSHIP_TERMS = (
     "white-label",
     "subcontract",
     "subcontractor",
-    "overflow",
+    "agency overflow",
+    "client overflow",
+    "project overflow",
+    "work overflow",
     "need extra capacity",
     "extra capacity",
     "delivery partner",
@@ -438,6 +572,60 @@ def _hn_job_like(opportunity: Opportunity, text: str) -> bool:
     return _count(text, HN_JOB_MARKERS) >= 2
 
 
+def _community_marketplace(opportunity: Opportunity) -> bool:
+    return (
+        opportunity.source in {"make", "n8n"}
+        and opportunity.metadata.get("category_kind") == "marketplace"
+    )
+
+
+def _community_topic(opportunity: Opportunity) -> bool:
+    return opportunity.metadata.get("event_type") == "topic"
+
+
+def _community_author_reply(opportunity: Opportunity) -> bool:
+    return (
+        opportunity.source in {"make", "n8n"}
+        and opportunity.metadata.get("event_type") == "reply"
+        and opportunity.metadata.get("is_topic_author") is True
+    )
+
+
+def _community_non_author_reply(opportunity: Opportunity) -> bool:
+    return (
+        opportunity.source in {"make", "n8n"}
+        and opportunity.metadata.get("event_type") == "reply"
+        and opportunity.metadata.get("is_topic_author") is not True
+    )
+
+
+def _community_employment_like(opportunity: Opportunity, text: str) -> bool:
+    if not _community_marketplace(opportunity) or not _community_topic(opportunity):
+        return False
+    structured_job = _count(text, JOB_STRUCTURE_MARKERS) >= 3
+    if structured_job:
+        return True
+    if _has_any(text, COMMUNITY_PROJECT_MARKERS):
+        return False
+    return _count(text, COMMUNITY_EMPLOYMENT_MARKERS) >= 2
+
+
+def _community_recruiter_reply(opportunity: Opportunity, text: str) -> bool:
+    return _community_author_reply(opportunity) and _count(text, RECRUITER_REPLY_MARKERS) >= 2
+
+
+def _community_vendor_promo(opportunity: Opportunity, text: str) -> bool:
+    if opportunity.source not in {"make", "n8n"} or not _community_topic(opportunity):
+        return False
+    if _has_any(text, STRONG_PAYMENT_TERMS) or _has_any(text, BUYER_HELP_TERMS):
+        return False
+    return _count(text, VENDOR_PROMO_MARKERS) >= 2
+
+
+def _community_buyer_update(opportunity: Opportunity, text: str) -> bool:
+    return _community_author_reply(opportunity) and _has_any(text, FRESH_BUYER_UPDATE_TERMS)
+
+
 def _strong_payment(text: str) -> bool:
     return _has_any(text, STRONG_PAYMENT_TERMS) or bool(CURRENCY_PATTERN.search(text))
 
@@ -459,6 +647,30 @@ def _agency_signal(text: str) -> bool:
     return _has_any(text, AGENCY_RELATIONSHIP_TERMS) or _has_any(text, AGENCY_IDENTITY_TERMS)
 
 
+
+
+def _github_direct_buyer_signal(opportunity: Opportunity, text: str) -> bool:
+    if opportunity.source != "github":
+        return True
+    # GitHub issues are often long specs/audits. Commercial-looking phrases buried
+    # deep in generated evidence must not turn an internal ticket into a lead.
+    # A real request to hire/pay someone should be visible in the title or opening
+    # context, so evaluate a bounded buyer-facing window only.
+    signal_text = f"{opportunity.title}\n{opportunity.body[:1600]}".casefold()
+    return _has_any(signal_text, GITHUB_DIRECT_BUYER_TERMS) or bool(CURRENCY_PATTERN.search(signal_text)) and _has_any(
+        signal_text,
+        (
+            "looking for",
+            "need someone",
+            "need a developer",
+            "need a contractor",
+            "need a freelancer",
+            "can pay",
+            "will pay",
+        ),
+    )
+
+
 def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
     text = opportunity.text.casefold()
     categories = _categories(analysis)
@@ -469,12 +681,47 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
 
     if _seller_like(opportunity, text):
         return AuthorType.JOB_SEEKER
-    if _has_any(text, SERVICE_PROVIDER_TERMS):
+    if _has_any(text, SERVICE_PROVIDER_TERMS) or _community_vendor_promo(opportunity, text):
         return AuthorType.SERVICE_PROVIDER
-    if _hn_job_like(opportunity, text):
+    # In marketplace/community threads, non-author replies are overwhelmingly
+    # applicants, helpers or discussion. They may quote the buyer's original
+    # post/title, so never inherit buyer intent from that surrounding context.
+    # We still store them for competition/history, but they are not interruptive
+    # opportunities.
+    if _community_non_author_reply(opportunity):
+        if _community_marketplace(opportunity):
+            return AuthorType.SERVICE_PROVIDER
+        return AuthorType.UNKNOWN
+    if _hn_job_like(opportunity, text) or _community_employment_like(opportunity, text):
         return AuthorType.RECRUITER
+    if _community_author_reply(opportunity):
+        reply_text = opportunity.body.casefold()
+        if _community_recruiter_reply(opportunity, reply_text):
+            return AuthorType.RECRUITER
+        if _community_buyer_update(opportunity, reply_text):
+            if _agency_signal(reply_text):
+                return AuthorType.AGENCY_BUYER
+            return AuthorType.BUYER
+        # Do not let a buyer-ish topic title turn routine author replies
+        # (application logistics, thanks, clarifications) into fresh opportunities.
+        return AuthorType.UNKNOWN
+    if _community_marketplace(opportunity) and _community_topic(opportunity):
+        if opportunity.source == "make":
+            if _agency_signal(text):
+                return AuthorType.AGENCY_BUYER
+            return AuthorType.BUYER
+        if strong_payment or explicit_help or _agency_signal(text):
+            if _agency_signal(text):
+                return AuthorType.AGENCY_BUYER
+            return AuthorType.TECHNICAL_BUYER
     if _has_any(text, LEARNER_TERMS) and not owned_business:
         return AuthorType.LEARNER
+    # GitHub is primarily an engineering/backlog source. Generic issue text must
+    # not become a buyer merely because it contains words such as "overflow",
+    # "client", "provider" or "paid" in a technical context. Require a
+    # directed request to pay/hire someone before allowing buyer classification.
+    if opportunity.source == "github" and not _github_direct_buyer_signal(opportunity, text):
+        return AuthorType.OSS_MAINTAINER
     if _agency_signal(text) and (strong_payment or explicit_help or owned_problem):
         return AuthorType.AGENCY_BUYER
     if strong_payment and owned_business:
@@ -493,10 +740,27 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
 def classify_commercial_intent(opportunity: Opportunity, analysis: Analysis, author_type: AuthorType) -> CommercialIntent:
     text = opportunity.text.casefold()
     categories = _categories(analysis)
-    if author_type in {AuthorType.JOB_SEEKER, AuthorType.SERVICE_PROVIDER, AuthorType.LEARNER, AuthorType.RECRUITER}:
+    if author_type in {
+        AuthorType.JOB_SEEKER,
+        AuthorType.SERVICE_PROVIDER,
+        AuthorType.LEARNER,
+        AuthorType.RECRUITER,
+        AuthorType.OSS_MAINTAINER,
+    }:
+        return CommercialIntent.NONE
+    if _community_non_author_reply(opportunity):
+        return CommercialIntent.NONE
+    if _community_author_reply(opportunity) and not _community_buyer_update(opportunity, opportunity.body.casefold()):
         return CommercialIntent.NONE
     if _strong_payment(text):
         return CommercialIntent.EXPLICIT
+    if _community_buyer_update(opportunity, text):
+        return CommercialIntent.EXPLICIT
+    if _community_marketplace(opportunity) and _community_topic(opportunity):
+        if opportunity.source == "make":
+            return CommercialIntent.IMPLICIT
+        if _explicit_help(text, analysis) or _agency_signal(text):
+            return CommercialIntent.IMPLICIT
     if _explicit_help(text, analysis) or _agency_signal(text):
         return CommercialIntent.IMPLICIT
     if categories & {"buyer_build_request", "buyer_manual_pain", "buyer_business_problem"}:
@@ -601,7 +865,14 @@ def _decision_maker_probability(text: str, author_type: AuthorType) -> int:
 
 
 def _contactability(opportunity: Opportunity) -> int:
-    base = 72 if opportunity.source == "hackernews" else 60 if opportunity.source == "github" else 65
+    if opportunity.source == "hackernews":
+        base = 72
+    elif opportunity.source == "github":
+        base = 60
+    elif opportunity.source in {"make", "n8n"}:
+        base = 84
+    else:
+        base = 65
     if opportunity.author:
         base += 8
     return min(100, base)
@@ -753,7 +1024,12 @@ def assess_commercial(
         cash = min(cash, 12)
         value = min(value, 24)
         relationship = min(relationship, 12)
-    if author_type == AuthorType.OSS_MAINTAINER and intent == CommercialIntent.NONE:
+    github_direct_buyer = _github_direct_buyer_signal(opportunity, text)
+    if opportunity.source == "github" and not github_direct_buyer:
+        cash = min(cash, 18)
+        value = min(value, 30)
+        relationship = min(relationship, 16)
+    elif author_type == AuthorType.OSS_MAINTAINER and intent == CommercialIntent.NONE:
         cash = min(cash, 18)
         value = min(value, 30)
         relationship = min(relationship, 16)
@@ -764,7 +1040,11 @@ def assess_commercial(
         AuthorType.AGENCY_BUYER,
         AuthorType.TECHNICAL_BUYER,
     }
-    can_interrupt = author_type in buyer_types and intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
+    can_interrupt = (
+        author_type in buyer_types
+        and intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
+        and (opportunity.source != "github" or github_direct_buyer)
+    )
     high_value_scope = _has_any(text, HIGH_VALUE_TERMS)
 
     if can_interrupt and relationship >= relationship_threshold:
@@ -809,6 +1089,10 @@ def assess_commercial(
         reasons.append("bounded technical scope")
     if relationship_signal >= 80:
         reasons.append("recurring/agency potential")
+    if _community_marketplace(opportunity) and _community_topic(opportunity):
+        reasons.append("buyer-oriented community category")
+    if _community_buyer_update(opportunity, text):
+        reasons.append("fresh buyer thread update")
 
     features: dict[str, int | float | str | bool] = {
         "technical_fit": tech_fit,
@@ -826,6 +1110,11 @@ def assess_commercial(
         "expansion_potential": expansion,
         "project_clarity": clarity,
         "owned_business_context": owned_business,
+        "community_marketplace": _community_marketplace(opportunity),
+        "community_author_reply": _community_author_reply(opportunity),
+        "community_non_author_reply": _community_non_author_reply(opportunity),
+        "fresh_buyer_update": _community_buyer_update(opportunity, text),
+        "github_direct_buyer_signal": github_direct_buyer,
     }
 
     return CommercialAssessment(

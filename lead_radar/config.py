@@ -31,6 +31,13 @@ class Settings:
     github_token: str | None
     github_lookback_hours: int
     github_results_per_query: int
+    make_enabled: bool
+    make_lookback_hours: int
+    make_topics_per_category: int
+    n8n_enabled: bool
+    n8n_lookback_hours: int
+    n8n_topics_per_category: int
+    discourse_concurrency: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
 
@@ -71,6 +78,13 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         github_token=os.getenv("GITHUB_TOKEN") or None,
         github_lookback_hours=int(os.getenv("GITHUB_LOOKBACK_HOURS", "24")),
         github_results_per_query=int(os.getenv("GITHUB_RESULTS_PER_QUERY", "50")),
+        make_enabled=_bool("MAKE_ENABLED", True),
+        make_lookback_hours=int(os.getenv("MAKE_LOOKBACK_HOURS", "48")),
+        make_topics_per_category=int(os.getenv("MAKE_TOPICS_PER_CATEGORY", "20")),
+        n8n_enabled=_bool("N8N_ENABLED", True),
+        n8n_lookback_hours=int(os.getenv("N8N_LOOKBACK_HOURS", "48")),
+        n8n_topics_per_category=int(os.getenv("N8N_TOPICS_PER_CATEGORY", "20")),
+        discourse_concurrency=int(os.getenv("DISCOURSE_CONCURRENCY", "6")),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID") or None,
     )

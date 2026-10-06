@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
-from .collectors import GitHubCollector, HackerNewsCollector
+from .collectors import GitHubCollector, HackerNewsCollector, MakeCommunityCollector, N8nCommunityCollector
 from .commercial import assess_commercial
 from .config import Settings, load_keyword_config
 from .database import Database
@@ -59,6 +61,59 @@ class RadarApp:
                 lookback_hours=self.settings.github_lookback_hours,
                 results_per_query=self.settings.github_results_per_query,
             )
+        if self.settings.make_enabled:
+            yield MakeCommunityCollector(
+                self.db,
+                lookback_hours=self.settings.make_lookback_hours,
+                max_topics_per_category=self.settings.make_topics_per_category,
+                concurrency=self.settings.discourse_concurrency,
+            )
+        if self.settings.n8n_enabled:
+            yield N8nCommunityCollector(
+                self.db,
+                lookback_hours=self.settings.n8n_lookback_hours,
+                max_topics_per_category=self.settings.n8n_topics_per_category,
+                concurrency=self.settings.discourse_concurrency,
+            )
+
+
+    def reclassify_stored(self, sources: tuple[str, ...] | None = None) -> dict[str, int]:
+        rows = self.db.reclassification_rows(sources)
+        counts = {"processed": 0, "p0": 0, "p1": 0, "reject": 0}
+        for row in rows:
+            metadata_raw = row["metadata_json"]
+            try:
+                metadata = json.loads(str(metadata_raw)) if metadata_raw else {}
+            except json.JSONDecodeError:
+                metadata = {}
+            created_at = datetime.fromisoformat(str(row["created_at"]))
+            opportunity = Opportunity(
+                source=str(row["source"]),
+                external_id=str(row["external_id"]),
+                url=str(row["url"]),
+                title=str(row["title"]),
+                body=str(row["body"]),
+                author=None if row["author"] is None else str(row["author"]),
+                created_at=created_at,
+                metadata=metadata if isinstance(metadata, dict) else {},
+            )
+            analysis = self.matcher.analyze(opportunity)
+            assessment = assess_commercial(
+                opportunity,
+                analysis,
+                cash_threshold=self.settings.cash_alert_threshold,
+                value_threshold=self.settings.value_alert_threshold,
+                relationship_threshold=self.settings.relationship_alert_threshold,
+            )
+            self.db.update_commercial_assessment(int(row["id"]), assessment)
+            counts["processed"] += 1
+            if assessment.p0:
+                counts["p0"] += 1
+            elif assessment.alert_class.value == "P1":
+                counts["p1"] += 1
+            elif assessment.alert_class.value == "REJECT":
+                counts["reject"] += 1
+        return counts
 
     async def process(
         self,

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .models import ScoredOpportunity
+from .models import CommercialAssessment, ScoredOpportunity
 
 
 SCHEMA = """
@@ -233,6 +233,56 @@ class Database:
                 (key, value, now),
             )
 
+
+    def reclassification_rows(self, sources: tuple[str, ...] | None = None) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            if sources:
+                placeholders = ",".join("?" for _ in sources)
+                query = f"""
+                    SELECT id, source, external_id, url, title, body, author, created_at, metadata_json
+                    FROM opportunities
+                    WHERE source IN ({placeholders})
+                    ORDER BY id
+                """
+                return list(conn.execute(query, sources).fetchall())
+            return list(
+                conn.execute(
+                    """
+                    SELECT id, source, external_id, url, title, body, author, created_at, metadata_json
+                    FROM opportunities
+                    ORDER BY id
+                    """
+                ).fetchall()
+            )
+
+    def update_commercial_assessment(self, opportunity_id: int, assessment: CommercialAssessment) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE opportunities
+                SET author_type=?, commercial_intent=?, opportunity_class=?, alert_class=?,
+                    cash_score=?, value_score=?, relationship_score=?, freshness_score=?,
+                    competition_score=?, commercial_features_json=?
+                WHERE id=?
+                """,
+                (
+                    assessment.author_type.value,
+                    assessment.commercial_intent.value,
+                    assessment.opportunity_class.value,
+                    assessment.alert_class.value,
+                    assessment.cash_score,
+                    assessment.value_score,
+                    assessment.relationship_score,
+                    assessment.freshness_score,
+                    assessment.competition_score,
+                    json.dumps(
+                        {"features": assessment.features, "reasons": assessment.reasons},
+                        ensure_ascii=False,
+                    ),
+                    opportunity_id,
+                ),
+            )
+
     def recent(self, limit: int = 20) -> list[sqlite3.Row]:
         with self.connect() as conn:
             return list(
@@ -246,6 +296,48 @@ class Database:
                     LIMIT ?
                     """,
                     (limit,),
+                ).fetchall()
+            )
+
+
+    def shortlist(self, limit: int = 20, sources: tuple[str, ...] | None = None) -> list[sqlite3.Row]:
+        """Return the highest-priority actionable P0/P1 opportunities.
+
+        Shortlist is intentionally stricter than ``recent``: it only shows NEW
+        opportunities that already passed the commercial classifier. This keeps
+        ignored/contacted/history rows out of the immediate action queue.
+        """
+        limit = max(1, min(limit, 200))
+        params: list[str | int] = []
+        source_clause = ""
+        if sources:
+            placeholders = ",".join("?" for _ in sources)
+            source_clause = f" AND source IN ({placeholders})"
+            params.extend(sources)
+        params.append(limit)
+
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    f"""
+                    SELECT id, source, status, created_at, discovered_at, title, url,
+                           author_type, commercial_intent, opportunity_class, alert_class,
+                           cash_score, value_score, relationship_score, freshness_score,
+                           competition_score,
+                           MAX(cash_score, value_score, relationship_score) AS priority_score
+                    FROM opportunities
+                    WHERE status='new'
+                      AND (alert_class LIKE 'P0_%' OR alert_class='P1')
+                      {source_clause}
+                    ORDER BY
+                        CASE WHEN alert_class LIKE 'P0_%' THEN 0 ELSE 1 END,
+                        priority_score DESC,
+                        freshness_score DESC,
+                        competition_score DESC,
+                        created_at DESC
+                    LIMIT ?
+                    """,
+                    params,
                 ).fetchall()
             )
 

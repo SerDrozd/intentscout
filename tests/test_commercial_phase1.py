@@ -186,6 +186,13 @@ def test_phase1_app_flow_persists_commercial_scores(tmp_path):
         github_token=None,
         github_lookback_hours=24,
         github_results_per_query=50,
+        make_enabled=False,
+        make_lookback_hours=48,
+        make_topics_per_category=20,
+        n8n_enabled=False,
+        n8n_lookback_hours=48,
+        n8n_topics_per_category=20,
+        discourse_concurrency=6,
         telegram_bot_token=None,
         telegram_chat_id=None,
     )
@@ -205,3 +212,213 @@ def test_phase1_app_flow_persists_commercial_scores(tmp_path):
     assert row["cash_score"] >= 72
     assert row["author_type"] in {"BUYER", "TECHNICAL_BUYER"}
     assert row["alert_class"] == "P0_CASH"
+
+
+def test_reclassify_stored_community_reply_removes_false_p0(tmp_path):
+    from lead_radar.app import RadarApp
+    from lead_radar.config import Settings
+
+    settings = Settings(
+        db_path=tmp_path / "radar.db",
+        keywords_path=ROOT / "config" / "keywords.yaml",
+        poll_interval_seconds=180,
+        log_level="INFO",
+        alert_threshold=13,
+        review_threshold=8,
+        alert_review_queue=False,
+        cash_alert_threshold=72,
+        value_alert_threshold=74,
+        relationship_alert_threshold=76,
+        max_alerts_per_cycle=5,
+        telegram_min_send_interval_seconds=1.15,
+        hn_enabled=False,
+        hn_bootstrap_items=300,
+        hn_max_items_per_cycle=500,
+        hn_concurrency=20,
+        github_enabled=False,
+        github_token=None,
+        github_lookback_hours=24,
+        github_results_per_query=50,
+        make_enabled=False,
+        make_lookback_hours=48,
+        make_topics_per_category=20,
+        n8n_enabled=False,
+        n8n_lookback_hours=48,
+        n8n_topics_per_category=20,
+        discourse_concurrency=6,
+        telegram_bot_token=None,
+        telegram_chat_id=None,
+    )
+    app = RadarApp(settings)
+    opportunity = Opportunity(
+        source="make",
+        external_id="topic:77:post:8",
+        url="https://community.make.com/t/x/77/8",
+        title="Reply: Looking for White-Label Make.com Automation Developers",
+        body="Hi, I run an automation studio and can help with your Make and API work.",
+        author="seller",
+        created_at=NOW - timedelta(minutes=3),
+        metadata={
+            "category_key": "hire_help",
+            "category_kind": "marketplace",
+            "event_type": "reply",
+            "topic_author": "buyer",
+            "is_topic_author": False,
+            "reply_count": 8,
+        },
+    )
+    # Insert a deliberately stale/incorrect assessment to simulate the Phase 2 bootstrap data.
+    analysis = app.matcher.analyze(opportunity)
+    from lead_radar.models import CommercialAssessment, OpportunityClass, ScoredOpportunity
+    stale = CommercialAssessment(
+        author_type=AuthorType.AGENCY_BUYER,
+        commercial_intent=CommercialIntent.EXPLICIT,
+        opportunity_class=OpportunityClass.RELATIONSHIP,
+        alert_class=AlertClass.P0_RELATIONSHIP,
+        cash_score=80,
+        value_score=87,
+        relationship_score=90,
+        freshness_score=100,
+        competition_score=58,
+        features={},
+        reasons=[],
+    )
+    inserted = app.db.insert(ScoredOpportunity(opportunity, analysis, 14, {}, assessment=stale))
+    assert inserted is not None
+    assert app.db.stats()["p0"] == 1
+
+    result = app.reclassify_stored(("make",))
+    assert result["processed"] == 1
+    assert result["reject"] == 1
+    assert app.db.stats()["p0"] == 0
+    row = app.db.recent(1)[0]
+    assert row["author_type"] == "SERVICE_PROVIDER"
+    assert row["alert_class"] == "REJECT"
+
+
+def test_github_backlog_spec_with_overflow_word_cannot_become_agency_buyer():
+    opportunity = make(
+        "github",
+        (
+            "Specification for provider/model cache preferences, context-overflow signals and tool-result image paths. "
+            "Preserve explicit-error and zero-output overflow scenarios and update the production tests."
+        ),
+        title="Qualify cache retention, overflow and tool images",
+        metadata={"comments": 0},
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.OSS_MAINTAINER
+    assert a.commercial_intent == CommercialIntent.NONE
+    assert a.features["github_direct_buyer_signal"] is False
+    assert a.alert_class == AlertClass.P2
+    assert not a.p0
+
+
+def test_github_direct_paid_request_can_still_surface():
+    opportunity = make(
+        "github",
+        (
+            "Our Stripe webhook is broken in production and customers are waiting. "
+            "We are looking for a contractor to fix it and have a budget for this work."
+        ),
+        title="Looking for contractor to fix production Stripe webhook",
+        metadata={"comments": 0},
+    )
+    a = assess(opportunity)
+    assert a.author_type in {AuthorType.BUYER, AuthorType.TECHNICAL_BUYER}
+    assert a.commercial_intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
+    assert a.features["github_direct_buyer_signal"] is True
+    assert a.alert_class in {AlertClass.P0_CASH, AlertClass.P0_HIGH_VALUE, AlertClass.P0_RELATIONSHIP, AlertClass.P1}
+
+
+def test_n8n_self_promoter_looking_for_opportunities_is_job_seeker():
+    opportunity = make(
+        "n8n",
+        (
+            "Looking for n8n Automation Opportunities / Collaboration. "
+            "I am an AI Automation Developer. I want to gain commercial experience and "
+            "I'm open to project-based work and long-term collaboration."
+        ),
+        title="N8n Automation Developer | Project-Based & Remote Collaboration",
+        metadata={"category_kind": "marketplace", "event_type": "topic", "reply_count": 1},
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.JOB_SEEKER
+    assert a.commercial_intent == CommercialIntent.NONE
+    assert a.alert_class == AlertClass.REJECT
+
+
+def test_make_vendor_product_promo_is_service_provider_not_buyer():
+    opportunity = make(
+        "make",
+        (
+            "I'm part of the InstantDM team. I'm sharing this because I'd like your feedback. "
+            "What it is: our product schedules social posts and has native Make nodes, REST API and webhooks. "
+            "Pricing note: there is a 4 day free trial. Docs: API reference."
+        ),
+        title="Schedule posts to 8 social platforms from Make.com",
+        metadata={"category_kind": "marketplace", "event_type": "topic", "reply_count": 0},
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.SERVICE_PROVIDER
+    assert a.commercial_intent == CommercialIntent.NONE
+    assert a.alert_class == AlertClass.REJECT
+
+
+def test_marketplace_author_application_logistics_reply_is_not_new_buyer_event():
+    opportunity = make(
+        "make",
+        (
+            "Thank you for your application. We are reviewing all applications and evaluating candidates "
+            "for the next stage. We will get back to you shortly with the interview date and time."
+        ),
+        title="Reply: Hiring Senior AI & Automation Operations Lead (Make.com Specialist) | Remote",
+        metadata={
+            "category_kind": "marketplace",
+            "event_type": "reply",
+            "topic_author": "buyer",
+            "is_topic_author": True,
+            "reply_count": 8,
+        },
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.RECRUITER
+    assert a.commercial_intent == CommercialIntent.NONE
+    assert a.alert_class == AlertClass.REJECT
+
+
+def test_structured_long_hiring_role_is_recruiter_even_when_contract_based():
+    opportunity = make(
+        "n8n",
+        (
+            "About the Role: We are looking for a hands-on AI Operations Lead. "
+            "Requirements: advanced n8n and Make. Type: long-term renewable contract. "
+            "How to Apply: submit your background, weekly hourly availability and portfolio. "
+            "Candidates will be invited to an interview."
+        ),
+        title="Hiring Senior AI & Automation Operations Lead (n8n & Make Specialist) | Remote",
+        metadata={"category_kind": "marketplace", "event_type": "topic", "reply_count": 12},
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.RECRUITER
+    assert a.commercial_intent == CommercialIntent.NONE
+    assert a.alert_class == AlertClass.REJECT
+
+
+def test_long_github_audit_cannot_trigger_on_buried_looking_for_phrase():
+    body = (
+        "Review action item. Phase P4. Plan and evidence. Why: reports are hidden. "
+        "What to do: enable flags, write tests, update production code, verify acceptance criteria. "
+        + ("internal engineering evidence and implementation detail. " * 80)
+        + "Users who go looking for someone to help with store reviews should find documentation."
+    )
+    opportunity = make(
+        "github",
+        body,
+        title="[A42] Ship the hidden features deliberately",
+        metadata={"comments": 0},
+    )
+    a = assess(opportunity)
+    assert a.author_type == AuthorType.OSS_MAINTAINER
+    assert a.features["github_direct_buyer_signal"] is False
+    assert a.alert_class == AlertClass.P2
