@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 
 from .models import (
     AlertClass,
@@ -665,6 +666,71 @@ def _agency_signal(text: str) -> bool:
 
 
 
+def _google_alert_target_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.path.rstrip("/") == "/url" and (host == "google.com" or host.endswith(".google.com")):
+        params = parse_qs(parsed.query)
+        for key in ("url", "q"):
+            values = params.get(key, [])
+            if values:
+                candidate = str(values[0]).strip()
+                candidate_parsed = urlparse(candidate)
+                if candidate_parsed.scheme in {"http", "https"} and candidate_parsed.hostname:
+                    return candidate
+    return url
+
+
+def _google_alert_direct_buyer_signal(opportunity: Opportunity) -> bool:
+    if opportunity.source != "google_alerts":
+        return True
+    title_text = opportunity.title.casefold()
+    body_text = opportunity.body[:1200].casefold()
+    title_terms = (
+        "looking for a developer",
+        "looking for developer",
+        "looking for a freelancer",
+        "looking for freelancer",
+        "need a developer",
+        "need developer",
+        "need a contractor",
+        "need contractor",
+        "need a freelancer",
+        "need freelancer",
+        "need help",
+        "willing to pay",
+        "seeking a developer",
+        "seeking developer",
+    )
+    if _has_any(title_text, title_terms):
+        return True
+    first_person_body_terms = (
+        "i need help",
+        "we need help",
+        "i need a developer",
+        "we need a developer",
+        "i need a contractor",
+        "we need a contractor",
+        "i need a freelancer",
+        "we need a freelancer",
+        "i am looking for",
+        "i'm looking for",
+        "we are looking for",
+        "we're looking for",
+        "willing to pay",
+        "i can pay",
+        "we can pay",
+        "i will pay",
+        "we will pay",
+    )
+    if _has_any(body_text, first_person_body_terms):
+        return True
+    target = urlparse(_google_alert_target_url(opportunity.url))
+    host = (target.hostname or "").lower()
+    path = target.path.casefold()
+    return (host == "freelancer.com" or host.endswith(".freelancer.com")) and "/projects/" in path
+
+
 def _github_direct_buyer_signal(opportunity: Opportunity, text: str) -> bool:
     if opportunity.source != "github":
         return True
@@ -1052,6 +1118,15 @@ def assess_commercial(
         value = min(value, 30)
         relationship = min(relationship, 16)
 
+    google_alert_direct_buyer = _google_alert_direct_buyer_signal(opportunity)
+    if opportunity.source == "google_alerts" and not google_alert_direct_buyer:
+        # Google Alerts often returns news/editorial pages that happen to contain
+        # buyer-ish search terms. Keep them for history, but require the target
+        # result itself to show direct buyer language before it can become P0/P1.
+        cash = min(cash, 45)
+        value = min(value, 45)
+        relationship = min(relationship, 42)
+
     buyer_types = {
         AuthorType.BUYER,
         AuthorType.POTENTIAL_BUYER,
@@ -1062,6 +1137,7 @@ def assess_commercial(
         author_type in buyer_types
         and intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
         and (opportunity.source != "github" or github_direct_buyer)
+        and (opportunity.source != "google_alerts" or google_alert_direct_buyer)
     )
     high_value_scope = _has_any(text, HIGH_VALUE_TERMS)
 
@@ -1133,6 +1209,7 @@ def assess_commercial(
         "community_non_author_reply": _community_non_author_reply(opportunity),
         "fresh_buyer_update": _community_buyer_update(opportunity, text),
         "github_direct_buyer_signal": github_direct_buyer,
+        "google_alert_direct_buyer_signal": google_alert_direct_buyer,
     }
 
     return CommercialAssessment(

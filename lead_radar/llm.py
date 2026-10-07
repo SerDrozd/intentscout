@@ -85,6 +85,7 @@ Important distinctions:
 - A generic OSS issue/spec/backlog item without a directed request to hire/pay someone is not a commercial opportunity. Reject.
 - A tutorial, learner question, generic discussion, product/vendor self-promotion, or portfolio post is not an opportunity. Reject.
 - A community reply from somebody other than the original buyer is usually an applicant/helper, even when the thread title contains buyer language.
+- Google Alerts is only a discovery wrapper. For SOURCE=google_alerts, classify the TARGET PAGE described by TITLE, BODY, URL and metadata. The word "Freelancer" in a marketplace site name or title suffix is not evidence that the page author is a freelancer selling services. A marketplace project/request can be a buyer opportunity.
 - Do not infer payment merely from words such as client, production, paid generation, budget field, overflow, bounty, or rate when they appear in technical/internal context.
 - Be conservative. False positives interrupt the user.
 
@@ -261,10 +262,15 @@ def _candidate_text(opportunity_id: int, opportunity: Opportunity, max_chars: in
         "is_topic_author": metadata.get("is_topic_author"),
         "reply_count": metadata.get("reply_count", metadata.get("comments")),
         "topic_author": metadata.get("topic_author"),
+        "feed_key": metadata.get("feed_key"),
+        "query_key": metadata.get("query_key"),
+        "search_query": metadata.get("search_query"),
+        "target_host": metadata.get("target_host"),
     }
     return (
         f"ID: {opportunity_id}\n"
         f"SOURCE: {opportunity.source}\n"
+        f"URL: {opportunity.url}\n"
         f"AUTHOR: {opportunity.author or ''}\n"
         f"CREATED_AT: {opportunity.created_at.astimezone(timezone.utc).isoformat()}\n"
         f"METADATA: {json.dumps(compact_meta, ensure_ascii=False)}\n"

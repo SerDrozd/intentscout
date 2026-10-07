@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import yaml
@@ -66,6 +67,30 @@ def _all_links(node: ET.Element) -> list[str]:
         if text:
             out.append(text)
     return out
+
+
+def _unwrap_google_result_url(url: str) -> str:
+    """Return the real target for Google redirect links without making a network request."""
+
+    value = url.strip()
+    if not value:
+        return value
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not (host == "google.com" or host.endswith(".google.com")):
+        return value
+    if parsed.path.rstrip("/") != "/url":
+        return value
+    params = parse_qs(parsed.query)
+    for key in ("url", "q"):
+        candidates = params.get(key, [])
+        if not candidates:
+            continue
+        target = str(candidates[0]).strip()
+        target_parsed = urlparse(target)
+        if target_parsed.scheme in {"http", "https"} and target_parsed.hostname:
+            return target
+    return value
 
 
 def _parse_date(raw: str) -> datetime | None:
@@ -283,11 +308,27 @@ class RSSCollector:
 
             title = strip_html(_first_child_text(node, ("title",)))
             links = _all_links(node)
-            url = links[0] if links else _first_child_text(node, ("link",))
+            raw_url = links[0] if links else _first_child_text(node, ("link",))
+            url = _unwrap_google_result_url(raw_url) if feed.source == "google_alerts" else raw_url
             body = _entry_body(node)
             if not title and not body:
                 continue
-            external_id = _entry_external_id(node, url, title, created)
+            external_id = _entry_external_id(node, raw_url or url, title, created)
+            target_host = (urlparse(url).hostname or "").lower() if url else ""
+            metadata: dict[str, Any] = {
+                "platform": "rss",
+                "feed_key": feed.key,
+                "feed_name": feed.name,
+                "feed_url": feed.url,
+                "category_kind": feed.category_kind,
+                "query_key": feed.query_key,
+                "search_query": feed.search_query,
+                "event_type": "topic",
+                "reply_count": None,
+                "target_host": target_host or None,
+            }
+            if feed.source == "google_alerts" and raw_url and raw_url != url:
+                metadata["google_redirect_url"] = raw_url
             opportunities.append(
                 Opportunity(
                     source=feed.source,
@@ -297,17 +338,7 @@ class RSSCollector:
                     body=body,
                     author=_entry_author(node),
                     created_at=created,
-                    metadata={
-                        "platform": "rss",
-                        "feed_key": feed.key,
-                        "feed_name": feed.name,
-                        "feed_url": feed.url,
-                        "category_kind": feed.category_kind,
-                        "query_key": feed.query_key,
-                        "search_query": feed.search_query,
-                        "event_type": "topic",
-                        "reply_count": None,
-                    },
+                    metadata=metadata,
                 )
             )
 

@@ -114,3 +114,66 @@ async def test_rss_collector_merges_local_overlay_without_public_secret(tmp_path
     )
     assert await collector.collect() == []
     assert Client.requested == ["https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"]
+
+
+@pytest.mark.asyncio
+async def test_google_alert_rss_unwraps_target_and_preserves_query_context(tmp_path: Path, monkeypatch) -> None:
+    feed_xml = b"""<?xml version='1.0' encoding='UTF-8'?>
+    <feed xmlns='http://www.w3.org/2005/Atom'>
+      <entry>
+        <id>tag:google.com,2026:test</id>
+        <title>Need help with CRM project (urgent) - Freelancer</title>
+        <link href='https://www.google.com/url?rct=j&amp;url=https%3A%2F%2Fwww.freelancer.com%2Fprojects%2Fapi-development%2Fneed-help-with-crm-project'/>
+        <published>2026-10-06T12:56:21Z</published>
+        <content>I need help fixing existing backend API issues and JSON request/response problems.</content>
+      </entry>
+    </feed>"""
+
+    class Response:
+        status_code = 200
+        headers: dict[str, str] = {}
+        content = feed_xml
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class Client:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, *, headers=None, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("lead_radar.collectors.rss.httpx.AsyncClient", Client)
+    config = tmp_path / "feeds.yaml"
+    config.write_text(
+        """feeds:
+  - key: google_alerts_crm
+    source: google_alerts
+    name: CRM buyer alert
+    url: https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED
+    enabled: true
+    category_kind: business_pain
+    lookback_hours: 168
+    max_items: 10
+    min_poll_minutes: 0
+    query_key: crm_integration_help
+    search_query: '"need help" CRM integration API'
+""",
+        encoding="utf-8",
+    )
+    collector = RSSCollector(Database(tmp_path / "radar.db"), config_path=config)
+    items = await collector.collect()
+    assert len(items) == 1
+    item = items[0]
+    assert item.url == "https://www.freelancer.com/projects/api-development/need-help-with-crm-project"
+    assert item.metadata["target_host"] == "www.freelancer.com"
+    assert item.metadata["query_key"] == "crm_integration_help"
+    assert item.metadata["search_query"] == '"need help" CRM integration API'
+    assert str(item.metadata["google_redirect_url"]).startswith("https://www.google.com/url?")

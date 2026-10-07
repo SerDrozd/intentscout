@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from lead_radar.database import Database
-from lead_radar.llm import OpenAILeadClassifier, decide_classification
+from lead_radar.llm import OpenAILeadClassifier, _candidate_text, decide_classification
 from lead_radar.models import (
     AuthorType,
     CommercialIntent,
@@ -368,3 +368,26 @@ def test_phase3_migrates_existing_opportunities_table_in_place(tmp_path) -> None
         tables = {row[0] for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"llm_decision", "llm_confidence", "llm_classified_at"} <= columns
     assert {"llm_classifications", "llm_usage"} <= tables
+
+
+def test_google_alert_candidate_includes_target_url_and_query_context() -> None:
+    opportunity = Opportunity(
+        source="google_alerts",
+        external_id="ga-1",
+        url="https://www.freelancer.com/projects/api-development/need-help",
+        title="Need help with CRM project (urgent) - Freelancer",
+        body="I need help fixing an existing backend API.",
+        author=None,
+        created_at=datetime.now(timezone.utc),
+        metadata={
+            "feed_key": "google_alerts_crm",
+            "query_key": "crm_integration_help",
+            "search_query": '"need help" CRM integration API',
+            "target_host": "www.freelancer.com",
+        },
+    )
+    text = _candidate_text(3155, opportunity, 5000)
+    assert "SOURCE: google_alerts" in text
+    assert "URL: https://www.freelancer.com/projects/api-development/need-help" in text
+    assert '"query_key": "crm_integration_help"' in text
+    assert '"target_host": "www.freelancer.com"' in text

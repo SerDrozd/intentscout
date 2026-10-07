@@ -608,3 +608,7 @@ python -m lead_radar alerts-plan
 The local RSS overlay is merged after `config/feeds.yaml`, so local entries can safely override a tracked template without editing or exposing the tracked file. Google Alerts opportunities carry `query_key` and `search_query` metadata, so `roi --by query` attributes downstream contact/reply/win data to the actual buyer-intent query instead of only to the feed filename.
 
 `alerts-add` validates that the URL is HTTPS and points to a Google Alerts `/alerts/feeds/` path. It never creates an alert in the Google account and never commits the feed URL.
+
+## Google Alerts precision guard (v0.12.0)
+
+Google Alerts entries are now treated as discovery wrappers rather than authoritative page authorship. The RSS collector unwraps Google redirect URLs locally, preserves query attribution, and records the target host. The LLM classifier receives the target URL plus alert query context, so marketplace branding such as `- Freelancer` is not mistaken for a service-provider author. Google Alerts results without direct buyer language are capped at P2, which suppresses news/editorial matches while retaining direct help/hiring/project requests.
