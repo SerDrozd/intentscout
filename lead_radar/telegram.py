@@ -93,9 +93,11 @@ class TelegramClient:
                 "P0_CASH": "🔥",
                 "P0_HIGH_VALUE": "💰",
                 "P0_RELATIONSHIP": "♻️",
+                "P1": "👀",
             }.get(a.alert_class.value, "🔥")
+            label = "WORTH CHECKING | P1" if a.alert_class.value == "P1" else a.alert_class.value
             headline = (
-                f"{icon} {a.alert_class.value} | CASH {a.cash_score} | VALUE {a.value_score} | REL {a.relationship_score}"
+                f"{icon} {label} | CASH {a.cash_score} | VALUE {a.value_score} | REL {a.relationship_score}"
             )
             commercial = (
                 f"{a.author_type.value} | {a.commercial_intent.value} | "

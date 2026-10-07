@@ -120,6 +120,89 @@ SERVICE_PROVIDER_TERMS = (
     "book a call",
 )
 
+SERVICE_OFFER_INTRO_TERMS = (
+    "i can help",
+    "i can fix",
+    "i can build",
+    "i can implement",
+    "i offer",
+    "i provide",
+    "my services",
+    "available today",
+    "i am available",
+    "i'm available",
+)
+
+SERVICE_OFFER_COMMERCIAL_TERMS = (
+    "my rate",
+    "my hourly rate",
+    "my price",
+    "price:",
+    "you pay",
+    "pay only after",
+    "no charge",
+    "deliverable",
+    "deliverables",
+    "what i need from you",
+    "what i need:",
+    "scope:",
+    "fixed for",
+)
+
+DIRECT_BUYER_ROLE_RE = re.compile(
+    r"\b(?:looking for|need|seeking|hiring)\b.{0,70}\b(?:developer|engineer|freelancer|contractor|consultant|specialist|expert|someone|somebody|help)\b",
+    re.IGNORECASE,
+)
+
+DIRECTIONAL_PAYMENT_TERMS = (
+    "willing to pay",
+    "happy to pay",
+    "we can pay",
+    "i can pay",
+    "can pay someone",
+    "budget available",
+    "we have a budget",
+    "i have a budget",
+)
+
+DIRECT_BUYER_ACTION_TERMS = (
+    "looking for someone",
+    "looking for somebody",
+    "need someone",
+    "need somebody",
+    "looking to hire",
+    "need a developer",
+    "looking for a developer",
+    "need a freelancer",
+    "looking for a freelancer",
+    "need a contractor",
+    "looking for a contractor",
+    "need a consultant",
+    "looking for a consultant",
+    "need help",
+    "looking for help",
+    "paid trial",
+    "paid test",
+    "paid task",
+    "paid project",
+)
+
+TECHNICAL_BUYER_ACTION_TERMS = (
+    "fix",
+    "build",
+    "implement",
+    "debug",
+    "integrate",
+    "automation",
+    "workflow",
+    "api",
+    "webhook",
+    "backend",
+    "crm",
+    "n8n",
+    "make.com",
+)
+
 SELLER_PROFILE_MARKERS = (
     "location:",
     "remote:",
@@ -563,11 +646,77 @@ def competition_score(opportunity: Opportunity) -> int:
     return 10
 
 
+def _direct_service_offer(opportunity: Opportunity, text: str) -> bool:
+    """Detect first-person service offers before buyer scoring.
+
+    The guard is intentionally compositional: a generic phrase such as
+    ``fixed price`` or ``I am available`` is not enough by itself. A seller
+    needs both a first-person offer signal and seller-side commercial/scope
+    language. This catches posts such as "I am available today ... Price: ...
+    You pay ... Deliverable ..." without turning ordinary buyer budgets into
+    service-provider posts.
+    """
+
+    intro_hits = _count(text, SERVICE_OFFER_INTRO_TERMS)
+    commercial_hits = _count(text, SERVICE_OFFER_COMMERCIAL_TERMS)
+    explicit_provider = _has_any(text, SERVICE_PROVIDER_TERMS)
+    if explicit_provider:
+        return True
+    if intro_hits >= 1 and commercial_hits >= 2:
+        return True
+    if intro_hits >= 2 and commercial_hits >= 1:
+        return True
+    return False
+
+
 def _seller_like(opportunity: Opportunity, text: str) -> bool:
+    if _direct_service_offer(opportunity, text):
+        return True
     if _has_any(text, SELLER_TERMS):
         return True
     profile_hits = sum(1 for marker in SELLER_PROFILE_MARKERS if marker in text.casefold())
     return opportunity.source == "hackernews" and profile_hits >= 3
+
+
+def has_direct_buyer_evidence(opportunity: Opportunity, analysis: Analysis) -> bool:
+    """Return whether a lead is safe enough to fail open without the LLM.
+
+    This is stricter than ordinary P1/P0 scoring. It is used for two things:
+    raw HN throttling and the emergency fail-open path when the LLM is out of
+    quota/unavailable.
+    """
+
+    text = f"{opportunity.title}\n{opportunity.body[:1800]}".casefold()
+    if _direct_service_offer(opportunity, text) or _has_any(text, SELLER_TERMS):
+        return False
+
+    categories = _categories(analysis)
+    technical_signal = bool(categories & PROBLEM_CATEGORIES)
+    if opportunity.source == "github":
+        return _github_direct_buyer_signal(opportunity, text)
+    if opportunity.source == "google_alerts":
+        return _google_alert_direct_buyer_signal(opportunity)
+
+    if DIRECT_BUYER_ROLE_RE.search(text):
+        return technical_signal or _has_any(text, TECHNICAL_BUYER_ACTION_TERMS)
+
+    if _has_any(text, DIRECT_BUYER_ACTION_TERMS) and technical_signal:
+        return True
+
+    if _has_any(text, DIRECTIONAL_PAYMENT_TERMS) and technical_signal and _has_any(text, TECHNICAL_BUYER_ACTION_TERMS):
+        return True
+
+    return False
+
+
+def _raw_hn_default(opportunity: Opportunity) -> bool:
+    return opportunity.source == "hackernews" and opportunity.metadata.get("platform") != "hn_algolia"
+
+
+def _bluesky_willing_pay_direct(opportunity: Opportunity, analysis: Analysis) -> bool:
+    if opportunity.source != "bluesky" or opportunity.metadata.get("query_family") != "willing_pay":
+        return True
+    return has_direct_buyer_evidence(opportunity, analysis)
 
 
 def _hn_job_like(opportunity: Opportunity, text: str) -> bool:
@@ -761,10 +910,12 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
     owned_business = _owned_business(text)
     owned_problem = bool(categories & {"buyer_owned_problem", "buyer_business_problem", "buyer_manual_pain"})
 
+    if _direct_service_offer(opportunity, text) or _community_vendor_promo(opportunity, text):
+        return AuthorType.SERVICE_PROVIDER
     if _seller_like(opportunity, text):
         return AuthorType.JOB_SEEKER
-    if _has_any(text, SERVICE_PROVIDER_TERMS) or _community_vendor_promo(opportunity, text):
-        return AuthorType.SERVICE_PROVIDER
+    if not _bluesky_willing_pay_direct(opportunity, analysis):
+        return AuthorType.UNKNOWN
     # In marketplace/community threads, non-author replies are overwhelmingly
     # applicants, helpers or discussion. They may quote the buyer's original
     # post/title, so never inherit buyer intent from that surrounding context.
@@ -808,7 +959,8 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
         return AuthorType.AGENCY_BUYER
     if strong_payment and owned_business:
         return AuthorType.BUYER
-    if strong_payment or explicit_help:
+    technical_signal = bool(categories & PROBLEM_CATEGORIES)
+    if explicit_help or (strong_payment and technical_signal):
         return AuthorType.TECHNICAL_BUYER
     if owned_business and owned_problem:
         return AuthorType.POTENTIAL_BUYER
@@ -1127,6 +1279,23 @@ def assess_commercial(
         value = min(value, 45)
         relationship = min(relationship, 42)
 
+    direct_buyer_evidence = has_direct_buyer_evidence(opportunity, analysis)
+    if _raw_hn_default(opportunity) and not direct_buyer_evidence:
+        # Raw HN comments are excellent context but extremely noisy as an alert
+        # source. Keep them in SQLite, while requiring explicit hire/help/payment
+        # language before they can consume P1/P0 attention or LLM quota.
+        cash = min(cash, 54)
+        value = min(value, 56)
+        relationship = min(relationship, 54)
+
+    if opportunity.source == "bluesky" and opportunity.metadata.get("query_family") == "willing_pay" and not direct_buyer_evidence:
+        # "willing to pay" is common in politics, commodities and consumer talk.
+        # The phrase is not commercial developer intent unless the post itself
+        # also asks for technical help/work.
+        cash = min(cash, 42)
+        value = min(value, 42)
+        relationship = min(relationship, 40)
+
     buyer_types = {
         AuthorType.BUYER,
         AuthorType.POTENTIAL_BUYER,
@@ -1138,6 +1307,8 @@ def assess_commercial(
         and intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
         and (opportunity.source != "github" or github_direct_buyer)
         and (opportunity.source != "google_alerts" or google_alert_direct_buyer)
+        and (not _raw_hn_default(opportunity) or direct_buyer_evidence)
+        and (opportunity.source != "bluesky" or opportunity.metadata.get("query_family") != "willing_pay" or direct_buyer_evidence)
     )
     high_value_scope = _has_any(text, HIGH_VALUE_TERMS)
 
@@ -1208,6 +1379,9 @@ def assess_commercial(
         "community_author_reply": _community_author_reply(opportunity),
         "community_non_author_reply": _community_non_author_reply(opportunity),
         "fresh_buyer_update": _community_buyer_update(opportunity, text),
+        "direct_buyer_evidence": direct_buyer_evidence,
+        "direct_service_offer": _direct_service_offer(opportunity, text),
+        "raw_hn_default": _raw_hn_default(opportunity),
         "github_direct_buyer_signal": github_direct_buyer,
         "google_alert_direct_buyer_signal": google_alert_direct_buyer,
     }

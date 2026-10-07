@@ -261,6 +261,11 @@ async def async_main(args: argparse.Namespace) -> int:
         usage: dict[str, object] = dict(app.db.llm_usage_summary())
         usage["daily_budget_usd"] = settings.daily_llm_budget_usd
         usage["monthly_budget_usd"] = settings.monthly_llm_budget_usd
+        usage["max_candidates_per_hour"] = settings.max_llm_candidates_per_hour
+        usage["max_candidates_per_day"] = settings.max_llm_candidates_per_day
+        usage["alert_reserve_per_hour"] = settings.llm_alert_reserve_per_hour
+        usage["alert_reserve_per_day"] = settings.llm_alert_reserve_per_day
+        usage["review_alerts_enabled"] = settings.review_alerts_enabled
         usage["model"] = settings.llm_model
         print(usage)
         return 0

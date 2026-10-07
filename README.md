@@ -612,3 +612,38 @@ The local RSS overlay is merged after `config/feeds.yaml`, so local entries can 
 ## Google Alerts precision guard (v0.12.0)
 
 Google Alerts entries are now treated as discovery wrappers rather than authoritative page authorship. The RSS collector unwraps Google redirect URLs locally, preserves query attribution, and records the target host. The LLM classifier receives the target URL plus alert query context, so marketplace branding such as `- Freelancer` is not mistaken for a service-provider author. Google Alerts results without direct buyer language are capped at P2, which suppresses news/editorial matches while retaining direct help/hiring/project requests.
+
+## Phase 8D: precision, protected LLM quota, and review alerts (v0.13.0)
+
+Phase 8D is a production tuning pass based on a full-day run where background HN candidates exhausted the daily candidate count while Telegram stayed mostly silent. It changes alert allocation rather than adding more sources.
+
+Key safeguards:
+
+- first-person service offers with seller-side price/scope/deliverable language are hard-rejected before LLM scoring;
+- raw `hackernews:default` comments cannot become P1/P0 without direct buyer evidence;
+- Bluesky `willing_pay` results require an actual technical buyer request, preventing generic politics/commodity uses of the phrase;
+- live Telegram candidates are LLM-gated and sent before background shortlist enrichment;
+- background LLM work keeps a protected reserve for fresh alert candidates;
+- when LLM is unavailable/out of quota, only a deterministic P0 with direct buyer evidence may fail open; inferred P0s and P1s are held;
+- a narrow, fresh P1 lane can reach Telegram as `👀 WORTH CHECKING` after the LLM gate;
+- cycle logs now expose commercial/review candidates and held candidates so the funnel is observable.
+
+Recommended defaults:
+
+```env
+MAX_LLM_CANDIDATES_PER_HOUR=12
+MAX_LLM_CANDIDATES_PER_DAY=100
+LLM_ALERT_RESERVE_PER_HOUR=4
+LLM_ALERT_RESERVE_PER_DAY=25
+REVIEW_ALERTS_ENABLED=true
+REVIEW_ALERT_MIN_PRIORITY=64
+REVIEW_ALERT_MIN_FRESHNESS=68
+```
+
+After upgrading an existing database, re-run deterministic scoring for the noisy sources before restarting continuous mode:
+
+```powershell
+python -m lead_radar reclassify --source hackernews --source bluesky --source n8n
+python -X utf8 -m lead_radar shortlist --limit 50
+python -m lead_radar llm-stats
+```

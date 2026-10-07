@@ -23,12 +23,12 @@ from .collectors import (
     ZapierWebCollector,
 )
 from .adaptive import AdaptiveScheduler
-from .commercial import assess_commercial
+from .commercial import assess_commercial, has_direct_buyer_evidence
 from .config import Settings, load_keyword_config
 from .database import Database
 from .llm import CLASSIFIER_SCHEMA_VERSION, LLMAPIError, LLMBudgetExceeded, OpenAILeadClassifier
 from .matcher import Matcher
-from .models import LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
+from .models import AlertClass, AuthorType, LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
 from .scoring import score
 from .collectors.bluesky import QUERY_FAMILIES as BLUESKY_QUERY_FAMILIES
 from .collectors.github import BROAD_QUERIES as GITHUB_BROAD_QUERIES
@@ -51,6 +51,9 @@ class CycleStats:
     intent_filtered: int = 0
     llm_classified: int = 0
     llm_rejected: int = 0
+    llm_held: int = 0
+    commercial_candidates: int = 0
+    review_candidates: int = 0
 
 
 class RadarApp:
@@ -296,16 +299,21 @@ class RadarApp:
             metadata=metadata if isinstance(metadata, dict) else {},
         )
 
-    def _budget_capacity(self) -> tuple[int, float, float]:
+    def _budget_capacity(self, *, purpose: str) -> tuple[int, float, float]:
         usage = self.db.llm_usage_summary()
-        hour_remaining = max(
-            0,
-            self.settings.max_llm_candidates_per_hour - int(usage["classified_candidates_hour"]),
-        )
-        day_remaining = max(
-            0,
-            self.settings.max_llm_candidates_per_day - int(usage["classified_candidates_today"]),
-        )
+        hour_cap = self.settings.max_llm_candidates_per_hour
+        day_cap = self.settings.max_llm_candidates_per_day
+
+        # Background shortlist enrichment must never consume the final slots that
+        # a fresh Telegram-bound candidate may need later in the hour/day. Live
+        # alert gating, manual classification and brief generation may use the
+        # full configured limits.
+        if purpose == "auto_shortlist":
+            hour_cap = max(0, hour_cap - self.settings.llm_alert_reserve_per_hour)
+            day_cap = max(0, day_cap - self.settings.llm_alert_reserve_per_day)
+
+        hour_remaining = max(0, hour_cap - int(usage["classified_candidates_hour"]))
+        day_remaining = max(0, day_cap - int(usage["classified_candidates_today"]))
         candidate_remaining = min(hour_remaining, day_remaining)
         daily_remaining = max(
             0.0,
@@ -331,7 +339,7 @@ class RadarApp:
         results: list[LLMClassification] = []
         offset = 0
         while offset < len(opportunities):
-            remaining, daily_usd, monthly_usd = self._budget_capacity()
+            remaining, daily_usd, monthly_usd = self._budget_capacity(purpose=purpose)
             if remaining <= 0:
                 if results:
                     break
@@ -405,7 +413,7 @@ class RadarApp:
         if not self.settings.llm_enabled or not self.llm.enabled:
             return None
 
-        remaining, daily_usd, monthly_usd = self._budget_capacity()
+        remaining, daily_usd, monthly_usd = self._budget_capacity(purpose="lead_brief")
         if remaining <= 0:
             raise LLMBudgetExceeded("LLM candidate budget reached")
         estimated = self.llm.estimate_brief_cost(opportunity_id, opportunity, context)
@@ -462,6 +470,25 @@ class RadarApp:
         }
         return await self._generate_lead_brief(opportunity_id, scored.opportunity, context)
 
+    def _review_alert_eligible(self, scored: ScoredOpportunity) -> bool:
+        assessment = scored.assessment
+        if assessment is None or assessment.alert_class != AlertClass.P1:
+            return False
+        if not self.settings.review_alerts_enabled:
+            return False
+        if assessment.priority_score < self.settings.review_alert_min_priority:
+            return False
+        if assessment.freshness_score < self.settings.review_alert_min_freshness:
+            return False
+        if assessment.author_type not in {
+            AuthorType.BUYER,
+            AuthorType.POTENTIAL_BUYER,
+            AuthorType.AGENCY_BUYER,
+            AuthorType.TECHNICAL_BUYER,
+        }:
+            return False
+        return has_direct_buyer_evidence(scored.opportunity, scored.analysis)
+
     async def _auto_classify_review_candidates(self, stats: CycleStats) -> None:
         if not self.settings.llm_enabled or not self.llm.enabled:
             return
@@ -482,17 +509,19 @@ class RadarApp:
         pending_alerts: list[tuple[int, int, ScoredOpportunity]],
         stats: CycleStats,
     ) -> list[tuple[int, int, ScoredOpportunity]]:
-        if not pending_alerts or not self.settings.llm_enabled or not self.llm.enabled:
-            return pending_alerts
+        if not pending_alerts:
+            return []
 
         decisions = self.db.llm_decisions([item[1] for item in pending_alerts])
+        llm_available = self.settings.llm_enabled and self.llm.enabled
         to_classify: list[tuple[int, Opportunity]] = []
-        for _, opportunity_id, scored in pending_alerts:
-            if decisions.get(opportunity_id, "NOT_RUN") == LLMDecision.NOT_RUN.value:
-                to_classify.append((opportunity_id, scored.opportunity))
+        if llm_available:
+            for _, opportunity_id, scored in pending_alerts:
+                if decisions.get(opportunity_id, "NOT_RUN") == LLMDecision.NOT_RUN.value:
+                    to_classify.append((opportunity_id, scored.opportunity))
         if to_classify:
             try:
-                classifications = await self._classify_opportunities(to_classify, purpose="live_p0_gate")
+                classifications = await self._classify_opportunities(to_classify, purpose="live_alert_gate")
                 stats.llm_classified += len(classifications)
                 decisions.update({item.opportunity_id: item.decision.value for item in classifications})
             except LLMBudgetExceeded as exc:
@@ -502,11 +531,30 @@ class RadarApp:
 
         kept: list[tuple[int, int, ScoredOpportunity]] = []
         for item in pending_alerts:
-            opportunity_id = item[1]
-            if decisions.get(opportunity_id) == LLMDecision.REJECT.value:
+            _, opportunity_id, scored = item
+            decision = decisions.get(opportunity_id, LLMDecision.NOT_RUN.value)
+            if decision == LLMDecision.REJECT.value:
                 stats.llm_rejected += 1
                 continue
-            kept.append(item)
+            if decision in {LLMDecision.PASS.value, LLMDecision.REVIEW.value}:
+                kept.append(item)
+                continue
+
+            # No LLM decision: fail open only for a deterministic P0 with direct,
+            # buyer-authored evidence. P1 review alerts and inferred/implicit P0s
+            # wait for quota instead of leaking seller/noise posts to Telegram.
+            assessment = scored.assessment
+            direct_buyer = has_direct_buyer_evidence(scored.opportunity, scored.analysis)
+            if assessment is not None and assessment.p0 and direct_buyer:
+                kept.append(item)
+            else:
+                stats.llm_held += 1
+                log.info(
+                    "Holding alert candidate %s without LLM decision: class=%s direct_buyer=%s",
+                    opportunity_id,
+                    assessment.alert_class.value if assessment is not None else "UNKNOWN",
+                    direct_buyer,
+                )
         return kept
 
     async def process(
@@ -545,8 +593,14 @@ class RadarApp:
             return
         stats.inserted += 1
 
-        should_alert = assessment.p0 or (
-            self.settings.alert_review_queue and assessment.alert_class.value == "P1"
+        if assessment.p0 or assessment.alert_class == AlertClass.P1:
+            stats.commercial_candidates += 1
+
+        review_alert = self._review_alert_eligible(scored)
+        if review_alert:
+            stats.review_candidates += 1
+        should_alert = assessment.p0 or review_alert or (
+            self.settings.alert_review_queue and assessment.alert_class == AlertClass.P1
         )
         if not should_alert:
             if total >= self.settings.alert_threshold:
@@ -672,9 +726,12 @@ class RadarApp:
                     error=error,
                 )
 
-        await self._auto_classify_review_candidates(stats)
+        # Fresh alert candidates get first claim on LLM quota and brief budget.
+        # Background shortlist enrichment runs only after Telegram-bound work is
+        # finished, so a noisy source cannot starve a later live opportunity.
         pending_alerts = await self._llm_filter_pending(pending_alerts, stats)
         await self._send_pending_alerts(pending_alerts, stats)
+        await self._auto_classify_review_candidates(stats)
         self._cycle_index += 1
         return stats
 
@@ -682,10 +739,12 @@ class RadarApp:
         while True:
             stats = await self.run_cycle()
             log.info(
-                "Cycle done: fetched=%s matched=%s inserted=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s llm_classified=%s llm_rejected=%s",
+                "Cycle done: fetched=%s matched=%s inserted=%s commercial=%s review_candidates=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s llm_classified=%s llm_rejected=%s llm_held=%s",
                 stats.fetched,
                 stats.matched,
                 stats.inserted,
+                stats.commercial_candidates,
+                stats.review_candidates,
                 stats.intent_filtered,
                 stats.alert_candidates,
                 stats.alerted,
@@ -693,5 +752,6 @@ class RadarApp:
                 stats.excluded,
                 stats.llm_classified,
                 stats.llm_rejected,
+                stats.llm_held,
             )
             await asyncio.sleep(self.settings.poll_interval_seconds)
