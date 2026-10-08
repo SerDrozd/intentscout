@@ -15,11 +15,14 @@ from .collectors import (
     GitHubCollector,
     HackerNewsAlgoliaCollector,
     HackerNewsCollector,
+    FlutterFlowWebCollector,
     HubSpotWebCollector,
     MakeCommunityCollector,
     N8nCommunityCollector,
     RSSCollector,
+    RetoolCommunityCollector,
     ShopifyCommunityCollector,
+    XanoWebCollector,
     ZapierWebCollector,
 )
 from .adaptive import AdaptiveScheduler
@@ -54,6 +57,13 @@ class CycleStats:
     llm_held: int = 0
     commercial_candidates: int = 0
     review_candidates: int = 0
+
+
+@dataclass(slots=True)
+class ManualIngestResult:
+    status: str
+    opportunity_id: int | None = None
+    scored: ScoredOpportunity | None = None
 
 
 class RadarApp:
@@ -104,6 +114,18 @@ class RadarApp:
             return "hackernews"
         return collector_name
 
+    def _effective_poll_interval(self, source: str) -> int:
+        plan_interval = self.adaptive.source_plan(source).interval_cycles
+        if source.casefold() in self.settings.protected_buyer_sources:
+            return min(plan_interval, self.settings.protected_buyer_max_poll_cycles)
+        return plan_interval
+
+    def _should_run_source(self, source: str) -> bool:
+        if not self.settings.adaptive_scheduling_enabled:
+            return True
+        interval = self._effective_poll_interval(source)
+        return self._cycle_index % interval == 0
+
     def adaptive_schedule_rows(self, *, days: int | None = None) -> list[dict[str, object]]:
         self._refresh_adaptive(force=True, days=days)
         query_specs = {
@@ -113,18 +135,21 @@ class RadarApp:
         }
         sources = (
             "hackernews", "bluesky", "rss", "github", "make", "n8n",
-            "shopify", "bubble", "airtable", "zapier",
+            "shopify", "bubble", "airtable", "zapier", "retool", "xano", "flutterflow",
         )
         rows: list[dict[str, object]] = []
         for source in sources:
             plan = self.adaptive.source_plan(source)
             base_limit, available = query_specs.get(source, (0, 0))
             query_limit = self.adaptive.query_limit(source, base_limit, available) if available else None
+            protected = source.casefold() in self.settings.protected_buyer_sources
             rows.append({
                 "source": source,
                 "recommendation": plan.recommendation.value,
                 "confidence": plan.confidence.value,
-                "interval_cycles": plan.interval_cycles,
+                "interval_cycles": self._effective_poll_interval(source),
+                "adaptive_interval_cycles": plan.interval_cycles,
+                "protected": protected,
                 "query_limit": query_limit,
                 "query_available": available or None,
                 "reason": plan.reason,
@@ -240,7 +265,56 @@ class RadarApp:
                 max_topics_per_section=self.settings.zapier_topics_per_section,
                 concurrency=self.settings.web_fetch_concurrency,
             )
+        if self.settings.retool_enabled:
+            yield RetoolCommunityCollector(
+                self.db,
+                lookback_hours=self.settings.retool_lookback_hours,
+                max_topics_per_category=self.settings.retool_topics_per_category,
+                concurrency=self.settings.discourse_concurrency,
+            )
+        if self.settings.xano_enabled:
+            yield XanoWebCollector(
+                self.db,
+                lookback_hours=self.settings.xano_lookback_hours,
+                max_topics_per_section=self.settings.xano_topics_per_section,
+                concurrency=self.settings.web_fetch_concurrency,
+            )
+        if self.settings.flutterflow_enabled:
+            yield FlutterFlowWebCollector(
+                self.db,
+                lookback_hours=self.settings.flutterflow_lookback_hours,
+                max_topics_per_section=self.settings.flutterflow_topics_per_section,
+                concurrency=self.settings.web_fetch_concurrency,
+            )
 
+    def ingest_manual(self, opportunity: Opportunity) -> ManualIngestResult:
+        if self.db.exists(opportunity.source, opportunity.external_id):
+            return ManualIngestResult(status="duplicate")
+        analysis = self.matcher.analyze(opportunity)
+        if analysis.excluded:
+            return ManualIngestResult(status="excluded")
+        direct_buyer = has_direct_buyer_evidence(opportunity, analysis)
+        if not analysis.phrase_matches and not direct_buyer:
+            return ManualIngestResult(status="no_match")
+        total, breakdown = score(opportunity, analysis)
+        assessment = assess_commercial(
+            opportunity,
+            analysis,
+            cash_threshold=self.settings.cash_alert_threshold,
+            value_threshold=self.settings.value_alert_threshold,
+            relationship_threshold=self.settings.relationship_alert_threshold,
+        )
+        scored = ScoredOpportunity(
+            opportunity=opportunity,
+            analysis=analysis,
+            score=total,
+            breakdown=breakdown,
+            assessment=assessment,
+        )
+        opportunity_id = self.db.insert(scored)
+        if opportunity_id is None:
+            return ManualIngestResult(status="duplicate")
+        return ManualIngestResult(status="stored", opportunity_id=opportunity_id, scored=scored)
 
     def reclassify_stored(self, sources: tuple[str, ...] | None = None) -> dict[str, int]:
         rows = self.db.reclassification_rows(sources)
@@ -687,16 +761,14 @@ class RadarApp:
         for collector in self.collectors():
             source = str(getattr(collector, "name", type(collector).__name__))
             adaptive_source = self._adaptive_source_name(source)
-            if self.settings.adaptive_scheduling_enabled and not self.adaptive.should_run(
-                adaptive_source, self._cycle_index
-            ):
+            if not self._should_run_source(adaptive_source):
                 plan = self.adaptive.source_plan(adaptive_source)
                 log.info(
                     "%s adaptive-skip cycle=%s recommendation=%s poll_every=%s",
                     source,
                     self._cycle_index,
                     plan.recommendation.value,
-                    plan.interval_cycles,
+                    self._effective_poll_interval(adaptive_source),
                 )
                 continue
             started = perf_counter()

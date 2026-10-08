@@ -527,6 +527,24 @@ ZAPIER_WEB_SECTIONS = (
     ),
 )
 
+XANO_WEB_SECTIONS = (
+    WebCommunitySection(
+        "find_expert",
+        "https://community.xano.com/find-a-xano-expert",
+        r"^/find-a-xano-expert/post/[^/?#]+$",
+        "marketplace",
+    ),
+)
+
+FLUTTERFLOW_WEB_SECTIONS = (
+    WebCommunitySection(
+        "job_postings",
+        "https://community.flutterflow.io/c/job-postings",
+        r"^/c/job-postings/post/[^/?#]+$",
+        "marketplace",
+    ),
+)
+
 
 class HubSpotWebCollector(PublicCommunityWebCollector):
     def __init__(self, db: Database, *, lookback_hours: int = 72, max_topics_per_section: int = 20, concurrency: int = 4) -> None:
@@ -558,6 +576,43 @@ class ZapierWebCollector(PublicCommunityWebCollector):
             name="zapier",
             db=db,
             sections=ZAPIER_WEB_SECTIONS,
+            lookback_hours=lookback_hours,
+            max_topics_per_section=max_topics_per_section,
+            concurrency=concurrency,
+        )
+
+class XanoWebCollector(PublicCommunityWebCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 336,
+        max_topics_per_section: int = 30,
+        concurrency: int = 4,
+    ) -> None:
+        super().__init__(
+            name="xano",
+            db=db,
+            sections=XANO_WEB_SECTIONS,
+            lookback_hours=lookback_hours,
+            max_topics_per_section=max_topics_per_section,
+            concurrency=concurrency,
+        )
+
+
+class FlutterFlowWebCollector(PublicCommunityWebCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 168,
+        max_topics_per_section: int = 30,
+        concurrency: int = 4,
+    ) -> None:
+        super().__init__(
+            name="flutterflow",
+            db=db,
+            sections=FLUTTERFLOW_WEB_SECTIONS,
             lookback_hours=lookback_hours,
             max_topics_per_section=max_topics_per_section,
             concurrency=concurrency,

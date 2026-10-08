@@ -730,7 +730,7 @@ def _hn_job_like(opportunity: Opportunity, text: str) -> bool:
 def _discourse_community(opportunity: Opportunity) -> bool:
     # Historical name kept for compatibility: this now covers both direct
     # Discourse JSON adapters and the safe public-HTML community adapter.
-    return opportunity.metadata.get("platform") in {"discourse", "community_web", "rss"} or opportunity.source in {
+    return opportunity.metadata.get("platform") in {"discourse", "community_web", "rss", "manual_social"} or opportunity.source in {
         "make",
         "n8n",
         "hubspot",
@@ -830,54 +830,83 @@ def _google_alert_target_url(url: str) -> str:
     return url
 
 
+# Google Alerts search terms are NOT buyer evidence: a news article may quote
+# someone "willing to pay", mention "API", or say "we are looking for" in an
+# unrelated context. Require a software-related request on the destination.
+GOOGLE_ALERT_TECHNICAL_SCOPE_RE = re.compile(
+    r"\b(?:api|apis|webhooks?|python|fastapi|backend|back-end|n8n|zapier|"
+    r"crm|hubspot|automation|automate|software|scripting|scraping|"
+    r"web\s+development|app\s+development|data\s+pipeline|"
+    r"make\.com|rest\s+api|json)\b",
+    re.IGNORECASE,
+)
+
+# High-confidence publisher sites from observed false positives. This is a
+# secondary guard, not the primary classifier, so new publishers are still
+# rejected when they lack direct technical buyer language.
+GOOGLE_ALERT_EDITORIAL_HOSTS = (
+    "malaymail.com",
+    "winnipegfreepress.com",
+    "nst.com.my",
+    "khan.co.kr",
+    "gurufocus.com",
+    "focus2move.com",
+    "washingtonsun.com",
+    "36kr.com",
+)
+
+
 def _google_alert_direct_buyer_signal(opportunity: Opportunity) -> bool:
     if opportunity.source != "google_alerts":
         return True
+
+    target = urlparse(_google_alert_target_url(opportunity.url))
+    host = (target.hostname or "").casefold()
+    path = target.path.casefold()
+    # A marketplace project is an explicitly scoped buyer-side posting, even
+    # when its Google snippet is clipped. It is still subject to the normal
+    # technical matcher and seller guard.
+    if (host == "freelancer.com" or host.endswith(".freelancer.com")) and "/projects/" in path:
+        return True
+
+    if any(host == publisher or host.endswith("." + publisher) for publisher in GOOGLE_ALERT_EDITORIAL_HOSTS):
+        return False
+    if path.startswith(("/news/", "/article/", "/articles/", "/stories/")):
+        return False
+
     title_text = opportunity.title.casefold()
     body_text = opportunity.body[:1200].casefold()
-    title_terms = (
-        "looking for a developer",
-        "looking for developer",
-        "looking for a freelancer",
-        "looking for freelancer",
-        "need a developer",
-        "need developer",
-        "need a contractor",
-        "need contractor",
-        "need a freelancer",
-        "need freelancer",
-        "need help",
-        "willing to pay",
-        "seeking a developer",
-        "seeking developer",
+    combined = f"{title_text}\n{body_text}"
+    if not GOOGLE_ALERT_TECHNICAL_SCOPE_RE.search(combined):
+        return False
+
+    direct_role_terms = (
+        "looking for a developer", "looking for developer",
+        "looking for a freelancer", "looking for freelancer",
+        "need a developer", "need developer",
+        "need a contractor", "need contractor",
+        "need a freelancer", "need freelancer",
+        "seeking a developer", "seeking developer",
+        "hiring a developer", "hiring developer",
     )
-    if _has_any(title_text, title_terms):
+    if _has_any(title_text, direct_role_terms):
         return True
-    first_person_body_terms = (
-        "i need help",
-        "we need help",
-        "i need a developer",
-        "we need a developer",
-        "i need a contractor",
-        "we need a contractor",
-        "i need a freelancer",
-        "we need a freelancer",
-        "i am looking for",
-        "i'm looking for",
-        "we are looking for",
-        "we're looking for",
-        "willing to pay",
-        "i can pay",
-        "we can pay",
-        "i will pay",
-        "we will pay",
+
+    first_person_buyer_terms = (
+        "i need help", "we need help",
+        "i need a developer", "we need a developer",
+        "i need a contractor", "we need a contractor",
+        "i need a freelancer", "we need a freelancer",
+        "i am looking for", "i'm looking for",
+        "we are looking for", "we're looking for",
+        "i can pay", "we can pay",
+        "i will pay", "we will pay",
     )
-    if _has_any(body_text, first_person_body_terms):
+    if _has_any(body_text, first_person_buyer_terms):
         return True
-    target = urlparse(_google_alert_target_url(opportunity.url))
-    host = (target.hostname or "").lower()
-    path = target.path.casefold()
-    return (host == "freelancer.com" or host.endswith(".freelancer.com")) and "/projects/" in path
+    if _has_any(title_text, ("need help", "paid task", "paid project")):
+        return True
+    return False
 
 
 def _github_direct_buyer_signal(opportunity: Opportunity, text: str) -> bool:
@@ -914,6 +943,8 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
         return AuthorType.SERVICE_PROVIDER
     if _seller_like(opportunity, text):
         return AuthorType.JOB_SEEKER
+    if opportunity.source == "google_alerts" and not _google_alert_direct_buyer_signal(opportunity):
+        return AuthorType.UNKNOWN
     if not _bluesky_willing_pay_direct(opportunity, analysis):
         return AuthorType.UNKNOWN
     # In marketplace/community threads, non-author replies are overwhelmingly
@@ -973,6 +1004,8 @@ def classify_author(opportunity: Opportunity, analysis: Analysis) -> AuthorType:
 
 def classify_commercial_intent(opportunity: Opportunity, analysis: Analysis, author_type: AuthorType) -> CommercialIntent:
     text = opportunity.text.casefold()
+    if opportunity.source == "google_alerts" and not _google_alert_direct_buyer_signal(opportunity):
+        return CommercialIntent.NONE
     categories = _categories(analysis)
     if author_type in {
         AuthorType.JOB_SEEKER,
@@ -1302,6 +1335,20 @@ def assess_commercial(
         AuthorType.AGENCY_BUYER,
         AuthorType.TECHNICAL_BUYER,
     }
+
+    manual_direct_buyer = (
+        opportunity.metadata.get("platform") == "manual_social"
+        and direct_buyer_evidence
+        and author_type in buyer_types
+    )
+    if manual_direct_buyer:
+        # Manual LinkedIn ingest starts from a post the user deliberately chose
+        # after a buyer-intent search. If the post itself still contains direct
+        # technical buyer evidence, keep it in the reviewable P1 lane even when
+        # the generic score is slightly below the normal threshold. Never use
+        # this to promote seller-like posts, and never force an automatic P0.
+        cash = max(cash, 60)
+
     can_interrupt = (
         author_type in buyer_types
         and intent in {CommercialIntent.IMPLICIT, CommercialIntent.EXPLICIT}
@@ -1358,6 +1405,8 @@ def assess_commercial(
         reasons.append("buyer-oriented community category")
     if _community_buyer_update(opportunity, text):
         reasons.append("fresh buyer thread update")
+    if manual_direct_buyer:
+        reasons.append("manual direct-buyer signal")
 
     features: dict[str, int | float | str | bool] = {
         "technical_fit": tech_fit,
@@ -1380,6 +1429,7 @@ def assess_commercial(
         "community_non_author_reply": _community_non_author_reply(opportunity),
         "fresh_buyer_update": _community_buyer_update(opportunity, text),
         "direct_buyer_evidence": direct_buyer_evidence,
+        "manual_direct_buyer": manual_direct_buyer,
         "direct_service_offer": _direct_service_offer(opportunity, text),
         "raw_hn_default": _raw_hn_default(opportunity),
         "github_direct_buyer_signal": github_direct_buyer,

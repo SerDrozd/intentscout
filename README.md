@@ -1,3 +1,148 @@
+# Lead Radar v3.0 Phase 9 - Buyer Discovery Expansion
+
+Phase 9 changes the discovery strategy from "scan more technical pain" to "prioritize public places where a buyer is explicitly trying to hire or pay someone now." It keeps the Phase 8D precision gates intact.
+
+## What Phase 9 adds
+
+- **Protected buyer-heavy polling lanes** so historical ROI cannot starve the sources that have the best chance of producing an immediate client:
+  - n8n Jobs / Help me Build;
+  - Make Hire Help;
+  - Airtable Jobs Board;
+  - Retool;
+  - Xano Find a Xano Expert;
+  - FlutterFlow job postings.
+- **Retool Forum** direct public Discourse monitoring:
+  - Discussion;
+  - Workflows;
+  - App Building.
+- **Xano Community** public marketplace monitoring for `Find a Xano Expert`.
+- **FlutterFlow Community** public job-posting monitoring.
+- **LinkedIn-assisted manual ingest** with no LinkedIn scraping, cookies, login automation, browser automation, or private endpoints.
+- Additional high-intent Google Alerts queries for `DM me`, contractor/freelancer, paid task, fixed-price API integration and urgent webhook work.
+- `schedule-plan` now shows when a buyer-heavy source is protected from adaptive down-throttling.
+- `once` now prints the full Phase 8D funnel (`commercial`, `review_candidates`, `alert_candidates`, `llm_held`) instead of only basic counters.
+
+## Protected buyer sources
+
+By default:
+
+```env
+PROTECTED_BUYER_SOURCES=n8n,make,airtable,retool,xano,flutterflow
+PROTECTED_BUYER_MAX_POLL_CYCLES=1
+```
+
+The adaptive optimizer still records ROI and recommendations, but these sources run at least once per configured maximum poll interval. With the default `1`, they are checked every radar cycle.
+
+This is deliberately different from GitHub/raw HN: a low historical conversion rate should not cause the radar to miss a fresh explicit hiring post in a buyer-heavy category.
+
+## New public source settings
+
+```env
+RETOOL_ENABLED=true
+RETOOL_LOOKBACK_HOURS=168
+RETOOL_TOPICS_PER_CATEGORY=25
+
+XANO_ENABLED=true
+XANO_LOOKBACK_HOURS=336
+XANO_TOPICS_PER_SECTION=30
+
+FLUTTERFLOW_ENABLED=true
+FLUTTERFLOW_LOOKBACK_HOURS=168
+FLUTTERFLOW_TOPICS_PER_SECTION=30
+```
+
+All three adapters are read-only. They use public pages/Discourse JSON only and do not log in.
+
+## Safe LinkedIn-assisted workflow
+
+Lead Radar still does **not** scrape LinkedIn.
+
+Use LinkedIn manually with `Posts -> Recent`, copy the post text, then hand the post to the local radar:
+
+```powershell
+Get-Clipboard | python -m lead_radar linkedin-add `
+  --url "https://www.linkedin.com/posts/..." `
+  --author "Post author" `
+  --query-key "looking_python_dm" `
+  --text-file -
+```
+
+You can also pass `--text "..."` or a UTF-8 file with `--text-file post.txt`.
+
+Optional exact post time:
+
+```powershell
+--created-at "2026-10-08T11:25:00+03:00"
+```
+
+When omitted, the radar assumes the post was discovered now and marks that assumption in metadata.
+
+`linkedin-add`:
+
+1. validates that the URL is on LinkedIn;
+2. applies the same seller guard, deterministic matcher and commercial scoring;
+3. stores the lead in SQLite;
+4. if it is P0/P1 and the LLM is configured, runs the precision classifier immediately;
+5. for a contact-worthy PASS/REVIEW, generates the same bounded outreach brief/draft used by Telegram.
+
+This gives the useful part of LinkedIn automation without risking the account with automated search or authenticated scraping.
+
+## Google Alerts additions
+
+Run:
+
+```powershell
+python -m lead_radar alerts-plan
+```
+
+Phase 9 adds high-intent query keys including:
+
+- `dm_python_developer`
+- `dm_api_developer`
+- `webhook_contractor`
+- `backend_freelancer`
+- `paid_n8n_help`
+- `fixed_api_integration`
+- `paid_python_task`
+- `urgent_webhook_developer`
+
+Create only the alerts you want in Google Alerts with RSS delivery, then add each real URL locally:
+
+```powershell
+python -m lead_radar alerts-add --key dm_api_developer --url "REAL_GOOGLE_ALERT_RSS_URL"
+```
+
+Real Google Alerts feed URLs stay only in the gitignored `config/feeds.local.yaml`.
+
+## Recommended Phase 9 runtime profile
+
+Raw Hacker News has produced a large amount of low-commercial-value volume. For a money-first run, prefer targeted HN search and disable the raw firehose locally:
+
+```env
+HN_ENABLED=false
+HN_ALGOLIA_ENABLED=true
+```
+
+Keep the protected buyer lanes enabled.
+
+## Verify Phase 9
+
+```powershell
+ruff check .
+mypy lead_radar
+python -m pytest -q
+python -m compileall -q lead_radar
+git diff --check
+
+python -m lead_radar schedule-plan
+python -m lead_radar alerts-plan
+python -m lead_radar once
+```
+
+Do not wait 12 hours for validation. Inspect the first few cycles and confirm that buyer-heavy sources are being polled every cycle while background sources remain adaptive.
+
+---
+
 # Lead Radar v2.3 Phase 6B - Config-driven RSS/Atom discovery
 
 Phase 6B adds a generic public RSS/Atom collector so new feed sources can be added in YAML without writing a new Python adapter. It keeps the same deterministic matcher, commercial scoring, SQLite dedupe, LLM precision gate and Telegram controls.

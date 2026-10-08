@@ -86,3 +86,59 @@ alerts:
     category_kind: business_pain
     priority: P2
     rationale: Earlier-stage pain signal; useful for discovery but expected to be noisier.
+
+  - key: dm_python_developer
+    query: '"DM me" "Python developer"'
+    feed_key: google_alerts_dm_python_developer
+    category_kind: marketplace
+    priority: P0
+    rationale: Direct-response LinkedIn/social-style hiring language for a Python developer.
+
+  - key: dm_api_developer
+    query: '"DM me" "API developer"'
+    feed_key: google_alerts_dm_api_developer
+    category_kind: marketplace
+    priority: P0
+    rationale: Direct contact path plus an API implementation role is a high-intent buyer signal.
+
+  - key: webhook_contractor
+    query: '"looking for contractor" webhook'
+    feed_key: google_alerts_webhook_contractor
+    category_kind: marketplace
+    priority: P0
+    rationale: Explicit contractor intent around a bounded webhook problem.
+
+  - key: backend_freelancer
+    query: '"need freelancer" backend API'
+    feed_key: google_alerts_backend_freelancer
+    category_kind: marketplace
+    priority: P0
+    rationale: Strong freelance buying language aligned with backend/API work.
+
+  - key: paid_n8n_help
+    query: 'n8n "paid" "need help"'
+    feed_key: google_alerts_paid_n8n_help
+    category_kind: marketplace
+    priority: P0
+    rationale: Paid n8n help is often a small, immediate workflow/debugging task.
+
+  - key: fixed_api_integration
+    query: '"fixed price" "API integration"'
+    feed_key: google_alerts_fixed_api_integration
+    category_kind: marketplace
+    priority: P1
+    rationale: Fixed-price API integration requests can be quick paid milestones; seller posts are filtered downstream.
+
+  - key: paid_python_task
+    query: '"paid task" Python API'
+    feed_key: google_alerts_paid_python_task
+    category_kind: marketplace
+    priority: P1
+    rationale: Small paid Python/API tasks are a strong time-to-cash fit.
+
+  - key: urgent_webhook_developer
+    query: '"urgent" webhook "developer"'
+    feed_key: google_alerts_urgent_webhook_developer
+    category_kind: business_pain
+    priority: P1
+    rationale: Urgent webhook failures paired with developer language can surface same-day debugging work.

@@ -15,6 +15,7 @@ from .google_alerts import (
     upsert_google_alert_feed,
 )
 from .llm import LLMAPIError, LLMBudgetExceeded
+from .manual import build_linkedin_opportunity
 from .optimizer import advise_roi
 
 
@@ -65,6 +66,30 @@ def build_parser() -> argparse.ArgumentParser:
     alerts_add = sub.add_parser("alerts-add", help="Add or update one real Google Alerts RSS URL locally")
     alerts_add.add_argument("--key", required=True, help="Query key from alerts-plan")
     alerts_add.add_argument("--url", required=True, help="Real Google Alerts RSS feed URL")
+    linkedin_add = sub.add_parser(
+        "linkedin-add",
+        help="Safely ingest a LinkedIn post you copied manually; no LinkedIn scraping or login automation",
+    )
+    linkedin_add.add_argument("--url", required=True, help="LinkedIn post URL")
+    linkedin_add.add_argument("--author", default=None, help="Optional post author")
+    linkedin_add.add_argument("--title", default=None, help="Optional short title; otherwise derived from post text")
+    linkedin_add.add_argument(
+        "--created-at",
+        default=None,
+        help="Optional ISO 8601 post time; defaults to now when omitted",
+    )
+    linkedin_add.add_argument(
+        "--query-key",
+        default=None,
+        help="Optional label for the manual LinkedIn search that found this post",
+    )
+    body_group = linkedin_add.add_mutually_exclusive_group(required=True)
+    body_group.add_argument("--text", default=None, help="Post body text")
+    body_group.add_argument(
+        "--text-file",
+        default=None,
+        help="UTF-8 file containing the copied post body; use '-' to read stdin",
+    )
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -115,8 +140,11 @@ async def async_main(args: argparse.Namespace) -> int:
         stats = await app.run_cycle()
         print(
             f"fetched={stats.fetched} matched={stats.matched} inserted={stats.inserted} "
-            f"alerted={stats.alerted} excluded={stats.excluded} "
-            f"llm_classified={stats.llm_classified} llm_rejected={stats.llm_rejected}"
+            f"commercial={stats.commercial_candidates} review_candidates={stats.review_candidates} "
+            f"alert_candidates={stats.alert_candidates} alerted={stats.alerted} "
+            f"excluded={stats.excluded} intent_filtered={stats.intent_filtered} "
+            f"llm_classified={stats.llm_classified} llm_rejected={stats.llm_rejected} "
+            f"llm_held={stats.llm_held}"
         )
         return 0
     if args.command == "run":
@@ -204,10 +232,15 @@ async def async_main(args: argparse.Namespace) -> int:
             query_part = ""
             if schedule_row["query_limit"] is not None:
                 query_part = f" queries={schedule_row['query_limit']}/{schedule_row['query_available']}"
+            protection = ""
+            if schedule_row.get("protected"):
+                protection = (
+                    f" protected=true adaptive_poll={schedule_row['adaptive_interval_cycles']}"
+                )
             print(
                 f"{schedule_row['source']} recommendation={schedule_row['recommendation']} "
                 f"confidence={schedule_row['confidence']} poll_every={schedule_row['interval_cycles']} cycle(s)"
-                f"{query_part}"
+                f"{query_part}{protection}"
             )
             print(f"  reason: {schedule_row['reason']}")
         print("Preview only: no .env/YAML/source-enable setting was changed.")
@@ -256,6 +289,90 @@ async def async_main(args: argparse.Namespace) -> int:
             f"Configured {selected.key} in {settings.rss_local_feeds_path}. "
             "The local file is gitignored; run alerts-plan to verify ACTIVE status."
         )
+        return 0
+    if args.command == "linkedin-add":
+        if args.text_file == "-":
+            import sys
+            body = sys.stdin.read()
+        elif args.text_file:
+            try:
+                body = Path(args.text_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                print(f"Could not read LinkedIn post text file: {exc}")
+                return 2
+        else:
+            body = str(args.text or "")
+        try:
+            opportunity = build_linkedin_opportunity(
+                url=str(args.url),
+                body=body,
+                title=args.title,
+                author=args.author,
+                created_at=args.created_at,
+                query_key=args.query_key,
+            )
+        except ValueError as exc:
+            print(str(exc))
+            return 2
+
+        result = app.ingest_manual(opportunity)
+        if result.status == "duplicate":
+            print("This LinkedIn post is already in the radar database.")
+            return 0
+        if result.status == "excluded":
+            print("LinkedIn post was excluded by hard safety/noise rules.")
+            return 0
+        if result.status == "no_match":
+            print("LinkedIn post has no technical/buyer signal strong enough for this radar.")
+            return 0
+        assert result.opportunity_id is not None and result.scored is not None
+        assessment = result.scored.assessment
+        assert assessment is not None
+        print(
+            f"#{result.opportunity_id} [{assessment.alert_class.value}] "
+            f"priority={assessment.priority_score} cash={assessment.cash_score} "
+            f"value={assessment.value_score} rel={assessment.relationship_score} "
+            f"author={assessment.author_type.value} intent={assessment.commercial_intent.value}\n"
+            f"  {opportunity.url}"
+        )
+
+        if assessment.alert_class.value not in {"P0_CASH", "P0_HIGH_VALUE", "P0_RELATIONSHIP", "P1"}:
+            return 0
+        if not settings.llm_enabled or not settings.openai_api_key:
+            print("Stored without LLM review; configure LLM/OpenAI to generate a precision verdict and draft.")
+            return 0
+        try:
+            classifications = await app._classify_opportunities(
+                [(result.opportunity_id, opportunity)],
+                purpose="manual_linkedin",
+            )
+        except (LLMAPIError, LLMBudgetExceeded) as exc:
+            print(f"Stored; LLM review stopped safely: {exc}")
+            return 0
+        if not classifications:
+            print("Stored; no LLM classification was returned.")
+            return 0
+        classification = classifications[0]
+        print(
+            f"LLM {classification.decision.value} confidence={classification.confidence} "
+            f"contact={classification.should_contact} fit={classification.technical_fit} "
+            f"payment={classification.payment_intent}\n"
+            f"  {classification.rejection_reason if classification.decision.value == 'REJECT' else classification.problem_summary}"
+        )
+        if classification.decision.value == "REJECT" or not classification.should_contact:
+            return 0
+        try:
+            brief = await app.prepare_lead(result.opportunity_id)
+        except (LLMAPIError, LLMBudgetExceeded) as exc:
+            print(f"Lead stored and classified; brief generation stopped safely: {exc}")
+            return 0
+        if brief is not None:
+            print(
+                f"ACTION: {brief.contact_strategy.value}\n"
+                f"SCOPE: {brief.suggested_scope}\n"
+                f"PRICE: {brief.suggested_price_band}\n"
+                f"DRAFT:\n{brief.draft}"
+            )
         return 0
     if args.command == "llm-stats":
         usage: dict[str, object] = dict(app.db.llm_usage_summary())

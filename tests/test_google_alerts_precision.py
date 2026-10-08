@@ -46,3 +46,56 @@ def test_google_alert_direct_help_request_can_remain_actionable() -> None:
     )
     assert assessment.alert_class in {AlertClass.P0_CASH, AlertClass.P0_HIGH_VALUE, AlertClass.P1}
     assert assessment.features["google_alert_direct_buyer_signal"] is True
+
+
+def test_google_alert_quoted_willing_to_pay_is_not_a_buyer_without_technical_request() -> None:
+    assessment = _assess(
+        "Singapore's HDB market splits: Record S$1m deals, slower overall sales | Malay Mail",
+        'The report says buyers are "willing to pay" more for homes. They need help with rising costs.',
+        "https://www.malaymail.com/news/singapore/2026/10/07/hdb-market-splits/238098",
+    )
+    assert assessment.alert_class == AlertClass.P2
+    assert assessment.author_type.value == "UNKNOWN"
+    assert assessment.commercial_intent.value == "NONE"
+    assert assessment.features["google_alert_direct_buyer_signal"] is False
+
+
+def test_google_alert_editorial_quote_with_api_still_not_a_buyer() -> None:
+    assessment = _assess(
+        "A Syracuse legend takes the reins - Winnipeg Free Press",
+        'The coach said "we are looking for" more staff; an API can also help the team.',
+        "https://www.winnipegfreepress.com/uncategorized/2026/10/07/a-syracuse-legend",
+    )
+    assert assessment.alert_class == AlertClass.P2
+    assert assessment.author_type.value == "UNKNOWN"
+    assert assessment.commercial_intent.value == "NONE"
+
+
+def test_google_alert_non_editorial_willing_to_pay_news_without_hiring_is_not_a_buyer() -> None:
+    assessment = _assess(
+        "Oil firms willing to pay more for fuel",
+        "Industry analysts say companies are willing to pay for imports.",
+        "https://random-publication.test/energy/oil-price-report",
+    )
+    assert assessment.alert_class == AlertClass.P2
+    assert assessment.features["google_alert_direct_buyer_signal"] is False
+
+
+def test_google_alert_direct_api_help_from_forum_is_still_reviewable() -> None:
+    assessment = _assess(
+        "Need help with an API webhook",
+        "We need help fixing our Stripe webhook that is failing to sync payments. Can someone fix it?",
+        "https://community.example.test/t/stripe-api-webhook/123",
+    )
+    assert assessment.features["google_alert_direct_buyer_signal"] is True
+    assert assessment.author_type.value in {"TECHNICAL_BUYER", "POTENTIAL_BUYER", "BUYER"}
+
+
+def test_google_alert_first_person_paid_python_task_is_still_buyer() -> None:
+    assessment = _assess(
+        "Python API project help",
+        "We are looking for a Python developer to fix an API integration. This is paid work.",
+        "https://forum.example.test/t/paid-python-api-work/456",
+    )
+    assert assessment.features["google_alert_direct_buyer_signal"] is True
+    assert assessment.author_type.value in {"TECHNICAL_BUYER", "POTENTIAL_BUYER", "BUYER"}

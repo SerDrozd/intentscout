@@ -345,6 +345,12 @@ BUBBLE_CATEGORIES = (
     DiscourseCategory("jobs_freelance", "c/jobs-freelance/13.json", "marketplace"),
 )
 
+RETOOL_CATEGORIES = (
+    DiscourseCategory("discussion", "c/discussion/13.json", "business_pain"),
+    DiscourseCategory("workflows", "c/workflows/23.json", "business_pain"),
+    DiscourseCategory("app_building", "c/support/5.json", "business_pain"),
+)
+
 
 class MakeCommunityCollector(DiscourseCommunityCollector):
     def __init__(
@@ -449,6 +455,25 @@ class BubbleCommunityCollector(DiscourseCommunityCollector):
             base_url="https://forum.bubble.io/",
             db=db,
             categories=BUBBLE_CATEGORIES,
+            lookback_hours=lookback_hours,
+            max_topics_per_category=max_topics_per_category,
+            concurrency=concurrency,
+        )
+
+class RetoolCommunityCollector(DiscourseCommunityCollector):
+    def __init__(
+        self,
+        db: Database,
+        *,
+        lookback_hours: int = 168,
+        max_topics_per_category: int = 25,
+        concurrency: int = 6,
+    ) -> None:
+        super().__init__(
+            name="retool",
+            base_url="https://community.retool.com/",
+            db=db,
+            categories=RETOOL_CATEGORIES,
             lookback_hours=lookback_hours,
             max_topics_per_category=max_topics_per_category,
             concurrency=concurrency,

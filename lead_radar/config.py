@@ -71,6 +71,24 @@ class Settings:
     zapier_enabled: bool = True
     zapier_lookback_hours: int = 168
     zapier_topics_per_section: int = 15
+    retool_enabled: bool = True
+    retool_lookback_hours: int = 168
+    retool_topics_per_category: int = 25
+    xano_enabled: bool = True
+    xano_lookback_hours: int = 336
+    xano_topics_per_section: int = 30
+    flutterflow_enabled: bool = True
+    flutterflow_lookback_hours: int = 168
+    flutterflow_topics_per_section: int = 30
+    protected_buyer_sources: tuple[str, ...] = (
+        "n8n",
+        "make",
+        "airtable",
+        "retool",
+        "xano",
+        "flutterflow",
+    )
+    protected_buyer_max_poll_cycles: int = 1
     web_fetch_concurrency: int = 4
     llm_enabled: bool = True
     openai_api_key: str | None = None
@@ -100,6 +118,14 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    values = tuple(part.strip().casefold() for part in raw.split(",") if part.strip())
+    return values or default
+
+
 def load_settings(base_dir: Path | None = None) -> Settings:
     base_dir = (base_dir or Path.cwd()).resolve()
     load_dotenv(base_dir / ".env")
@@ -124,7 +150,7 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         relationship_alert_threshold=int(os.getenv("RELATIONSHIP_ALERT_THRESHOLD", "76")),
         max_alerts_per_cycle=max(1, int(os.getenv("MAX_ALERTS_PER_CYCLE", "5"))),
         telegram_min_send_interval_seconds=max(1.05, float(os.getenv("TELEGRAM_MIN_SEND_INTERVAL_SECONDS", "1.15"))),
-        hn_enabled=_bool("HN_ENABLED", True),
+        hn_enabled=_bool("HN_ENABLED", False),
         hn_bootstrap_items=int(os.getenv("HN_BOOTSTRAP_ITEMS", "300")),
         hn_max_items_per_cycle=int(os.getenv("HN_MAX_ITEMS_PER_CYCLE", "500")),
         hn_concurrency=int(os.getenv("HN_CONCURRENCY", "20")),
@@ -161,6 +187,23 @@ def load_settings(base_dir: Path | None = None) -> Settings:
         zapier_enabled=_bool("ZAPIER_ENABLED", True),
         zapier_lookback_hours=int(os.getenv("ZAPIER_LOOKBACK_HOURS", "168")),
         zapier_topics_per_section=int(os.getenv("ZAPIER_TOPICS_PER_SECTION", "15")),
+        retool_enabled=_bool("RETOOL_ENABLED", True),
+        retool_lookback_hours=max(1, int(os.getenv("RETOOL_LOOKBACK_HOURS", "168"))),
+        retool_topics_per_category=max(1, min(50, int(os.getenv("RETOOL_TOPICS_PER_CATEGORY", "25")))),
+        xano_enabled=_bool("XANO_ENABLED", True),
+        xano_lookback_hours=max(1, int(os.getenv("XANO_LOOKBACK_HOURS", "336"))),
+        xano_topics_per_section=max(1, min(40, int(os.getenv("XANO_TOPICS_PER_SECTION", "30")))),
+        flutterflow_enabled=_bool("FLUTTERFLOW_ENABLED", True),
+        flutterflow_lookback_hours=max(1, int(os.getenv("FLUTTERFLOW_LOOKBACK_HOURS", "168"))),
+        flutterflow_topics_per_section=max(1, min(40, int(os.getenv("FLUTTERFLOW_TOPICS_PER_SECTION", "30")))),
+        protected_buyer_sources=_csv_tuple(
+            "PROTECTED_BUYER_SOURCES",
+            ("n8n", "make", "airtable", "retool", "xano", "flutterflow"),
+        ),
+        protected_buyer_max_poll_cycles=max(
+            1,
+            int(os.getenv("PROTECTED_BUYER_MAX_POLL_CYCLES", "1")),
+        ),
         web_fetch_concurrency=max(1, min(8, int(os.getenv("WEB_FETCH_CONCURRENCY", "4")))),
         discourse_concurrency=int(os.getenv("DISCOURSE_CONCURRENCY", "6")),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN") or None,
