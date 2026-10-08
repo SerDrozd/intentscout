@@ -31,7 +31,9 @@ from .config import Settings, load_keyword_config
 from .database import Database
 from .llm import CLASSIFIER_SCHEMA_VERSION, LLMAPIError, LLMBudgetExceeded, OpenAILeadClassifier
 from .matcher import Matcher
-from .models import AlertClass, AuthorType, LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity
+from .models import (
+    AlertClass, AuthorType, ContactStrategy, LeadBrief, LLMClassification, LLMDecision, Opportunity, ScoredOpportunity,
+)
 from .scoring import score
 from .collectors.bluesky import QUERY_FAMILIES as BLUESKY_QUERY_FAMILIES
 from .collectors.github import BROAD_QUERIES as GITHUB_BROAD_QUERIES
@@ -55,6 +57,7 @@ class CycleStats:
     llm_classified: int = 0
     llm_rejected: int = 0
     llm_held: int = 0
+    brief_vetoed: int = 0
     commercial_candidates: int = 0
     review_candidates: int = 0
 
@@ -801,6 +804,19 @@ class RadarApp:
                 log.info("Lead brief generation skipped for %s: %s", opportunity_id, exc)
             except LLMAPIError as exc:
                 log.warning("Lead brief generation failed safely for %s: %s", opportunity_id, exc)
+
+            # The action brief can discover non-negotiable restrictions (such as
+            # Czech-only replies and a Czech-residency requirement) that a
+            # generic hiring score did not detect. Its explicit IGNORE decision
+            # is a veto, never an instruction to send an alert labelled P0.
+            # Persist the outcome so recovered pending alerts cannot notify it
+            # again on the next cycle or after a restart.
+            if brief is not None and brief.contact_strategy == ContactStrategy.IGNORE:
+                self.db.set_status(opportunity_id, "screened_out", reason="auto_brief_contact_strategy_ignore")
+                stats.brief_vetoed += 1
+                log.info("Suppressed opportunity %s: action brief recommends IGNORE", opportunity_id)
+                continue
+
             try:
                 if await self.telegram.send_alert(opportunity_id, scored, brief):
                     stats.alerted += 1
@@ -880,7 +896,7 @@ class RadarApp:
         while True:
             stats = await self.run_cycle()
             log.info(
-                "Cycle done: fetched=%s matched=%s inserted=%s commercial=%s review_candidates=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s llm_classified=%s llm_rejected=%s llm_held=%s",
+                "Cycle done: fetched=%s matched=%s inserted=%s commercial=%s review_candidates=%s intent_filtered=%s alert_candidates=%s alerted=%s suppressed=%s excluded=%s llm_classified=%s llm_rejected=%s llm_held=%s brief_vetoed=%s",
                 stats.fetched,
                 stats.matched,
                 stats.inserted,
@@ -894,5 +910,6 @@ class RadarApp:
                 stats.llm_classified,
                 stats.llm_rejected,
                 stats.llm_held,
+                stats.brief_vetoed,
             )
             await asyncio.sleep(self.settings.poll_interval_seconds)

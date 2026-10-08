@@ -324,7 +324,7 @@ class Database:
         reason: str | None = None,
         revenue: float | None = None,
     ) -> None:
-        allowed = {"new", "ignored", "contacted", "replied", "proposal", "won", "lost"}
+        allowed = {"new", "ignored", "screened_out", "contacted", "replied", "proposal", "won", "lost"}
         if status not in allowed:
             raise ValueError(f"Unsupported lead status: {status}")
         if revenue is not None and revenue < 0:
@@ -349,7 +349,7 @@ class Database:
         can be rolled back without editing SQLite by hand. LLM classifications, briefs,
         matches, and notification history are preserved.
         """
-        feedback_actions = ("new", "ignored", "contacted", "replied", "proposal", "won", "lost")
+        feedback_actions = ("new", "ignored", "screened_out", "contacted", "replied", "proposal", "won", "lost")
         placeholders = ",".join("?" for _ in feedback_actions)
         with self.connect() as conn:
             exists = conn.execute("SELECT 1 FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()

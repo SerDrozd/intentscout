@@ -165,7 +165,7 @@ async def async_main(args: argparse.Namespace) -> int:
             f"alert_candidates={stats.alert_candidates} alerted={stats.alerted} "
             f"excluded={stats.excluded} intent_filtered={stats.intent_filtered} "
             f"llm_classified={stats.llm_classified} llm_rejected={stats.llm_rejected} "
-            f"llm_held={stats.llm_held}"
+            f"llm_held={stats.llm_held} brief_vetoed={stats.brief_vetoed}"
         )
         return 0
     if args.command == "run":
