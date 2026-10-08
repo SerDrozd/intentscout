@@ -456,6 +456,73 @@ class Database:
             )
             conn.execute("DELETE FROM llm_classifications WHERE opportunity_id=?", (opportunity_id,))
 
+    def rewind_marketplace_cursors(self, sources: tuple[str, ...]) -> dict[str, int]:
+        """Revisit visible hiring threads without deleting leads or feedback.
+
+        Only the Discourse category activity/post cursors are cleared. Author
+        attribution, all saved opportunities, and actions remain intact.
+        """
+        supported = {'make': 'hire_help', 'n8n': 'jobs', 'bubble': 'jobs_freelance'}
+        result: dict[str, int] = {}
+        with self.connect() as conn:
+            for source in sources:
+                if source not in supported:
+                    raise ValueError(f'Unsupported marketplace source: {source}')
+                prefix = f'discourse:{source}:{supported[source]}:topic:'
+                rows = conn.execute(
+                    """SELECT key FROM source_state WHERE key GLOB ?
+                       AND (key GLOB '*:last_post' OR key GLOB '*:activity')""",
+                    (prefix + '*',),
+                ).fetchall()
+                if rows:
+                    conn.executemany('DELETE FROM source_state WHERE key=?', [(str(row['key']),) for row in rows])
+                result[source] = len(rows)
+        return result
+
+    def pending_alert_rows(self, *, hours: int = 72, limit: int = 40) -> list[sqlite3.Row]:
+        """Recent unsent candidates; excludes contacted/rejected/previously delivered items.
+
+        The cycle's in-memory queue disappears after an LLM timeout or quota
+        limit. Without this query, a candidate is permanently lost because
+        subsequent collector passes see its source/external_id as a duplicate.
+        """
+        since = (datetime.now(timezone.utc) - timedelta(hours=max(1, hours))).isoformat()
+        with self.connect() as conn:
+            return list(conn.execute(
+                """SELECT id, source, external_id, url, title, body, author, created_at,
+                          metadata_json, author_type, commercial_intent, opportunity_class,
+                          alert_class, cash_score, value_score, relationship_score,
+                          freshness_score, competition_score, llm_decision, llm_confidence
+                   FROM opportunities
+                   WHERE status='new' AND notified_at IS NULL AND created_at >= ?
+                     AND (alert_class LIKE 'P0_%' OR alert_class='P1')
+                     AND llm_decision IN ('NOT_RUN','PASS','REVIEW')
+                   ORDER BY CASE WHEN alert_class LIKE 'P0_%' THEN 0 ELSE 1 END,
+                            created_at DESC, id DESC
+                   LIMIT ?""",
+                (since, max(1, min(200, limit))),
+            ).fetchall())
+
+    def buyer_board_rows(self, *, days: int = 10, limit: int = 400) -> list[sqlite3.Row]:
+        """A human-review pool, never a declaration that payment is confirmed."""
+        since = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
+        with self.connect() as conn:
+            return list(conn.execute(
+                """SELECT id, source, external_id, url, title, body, author, created_at,
+                          metadata_json, author_type, commercial_intent, opportunity_class,
+                          alert_class, cash_score, value_score, relationship_score,
+                          freshness_score, competition_score, llm_decision, llm_confidence
+                   FROM opportunities
+                   WHERE status='new' AND created_at >= ?
+                     AND llm_decision <> 'REJECT' AND alert_class <> 'REJECT'
+                     AND author_type NOT IN ('SERVICE_PROVIDER', 'JOB_SEEKER',
+                                             'LEARNER', 'SPAM', 'RECRUITER')
+                     AND (source IN ('make','n8n','bubble','airtable','xano','flutterflow')
+                          OR (source IN ('zapier','retool','shopify') AND alert_class='P1'))
+                   ORDER BY created_at DESC, id DESC LIMIT ?""",
+                (since, max(1, min(2000, limit))),
+            ).fetchall())
+
     def llm_candidate_rows(
         self,
         limit: int = 20,

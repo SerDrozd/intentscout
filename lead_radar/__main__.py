@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     recent = sub.add_parser("recent", help="Show recent matched opportunities")
     recent.add_argument("--limit", type=int, default=20)
     sub.add_parser("stats", help="Show SQLite stats")
+    board = sub.add_parser("buyer-board", help="Review new direct hiring and technical-pain leads; no automatic outreach")
+    board.add_argument("--days", type=int, default=10)
+    board.add_argument("--limit", type=int, default=25)
+    rescan = sub.add_parser('buyer-rescan', help='Revisit visible Make/n8n/Bubble hiring threads; preserves saved leads')
+    rescan.add_argument('--source', action='append', dest='sources', choices=('make', 'n8n', 'bubble'), required=True)
+    rescan.add_argument('--yes', action='store_true', help='Confirm replay of marketplace polling cursors')
     shortlist = sub.add_parser("shortlist", help="Show highest-priority actionable P0/P1 opportunities")
     shortlist.add_argument("--limit", type=int, default=20)
     shortlist.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
@@ -150,6 +156,24 @@ async def async_main(args: argparse.Namespace) -> int:
     if args.command == "run":
         await app.run_forever()
         return 0
+    if args.command == 'buyer-rescan':
+        if not args.yes:
+            print('Nothing changed. Pass --yes to revisit visible hiring threads (no leads or feedback are deleted).')
+            return 2
+        cursor_counts = app.db.rewind_marketplace_cursors(tuple(dict.fromkeys(args.sources)))
+        print(f'Reset marketplace polling cursors: {cursor_counts}. Run once, then buyer-board.')
+        return 0
+    if args.command == "buyer-board":
+        board_items = app.buyer_board(days=args.days, limit=args.limit)
+        if not board_items:
+            print("No qualified fresh public posts in the current buyer board. No paid work is confirmed.")
+        for label, row in board_items:
+            print(f"#{row['id']} [{label}] [{row['source']}] {_age_label(str(row['created_at']))} "
+                  f"cash={row['cash_score']} llm={row['llm_decision']}")
+            print(f"  {row['title']}")
+            print(f"  {row['url']}")
+        print("Manually verify budget, availability and contact method before reaching out.")
+        return 0
     if args.command == "stats":
         print(app.db.stats())
         return 0
@@ -222,13 +246,13 @@ async def async_main(args: argparse.Namespace) -> int:
         print("Dry-run only: no source, query, schedule, or budget setting was changed.")
         return 0
     if args.command == "schedule-plan":
-        rows = app.adaptive_schedule_rows(days=args.days)
+        schedule_rows = app.adaptive_schedule_rows(days=args.days)
         window_days = args.days or settings.adaptive_window_days
         print(
             f"Adaptive schedule preview: {window_days}d | enabled={str(settings.adaptive_scheduling_enabled).lower()} "
             "| in_memory=true | permanent_disable=false"
         )
-        for schedule_row in rows:
+        for schedule_row in schedule_rows:
             query_part = ""
             if schedule_row["query_limit"] is not None:
                 query_part = f" queries={schedule_row['query_limit']}/{schedule_row['query_available']}"
@@ -315,21 +339,21 @@ async def async_main(args: argparse.Namespace) -> int:
             print(str(exc))
             return 2
 
-        result = app.ingest_manual(opportunity)
-        if result.status == "duplicate":
+        manual_result = app.ingest_manual(opportunity)
+        if manual_result.status == "duplicate":
             print("This LinkedIn post is already in the radar database.")
             return 0
-        if result.status == "excluded":
+        if manual_result.status == "excluded":
             print("LinkedIn post was excluded by hard safety/noise rules.")
             return 0
-        if result.status == "no_match":
+        if manual_result.status == "no_match":
             print("LinkedIn post has no technical/buyer signal strong enough for this radar.")
             return 0
-        assert result.opportunity_id is not None and result.scored is not None
-        assessment = result.scored.assessment
+        assert manual_result.opportunity_id is not None and manual_result.scored is not None
+        assessment = manual_result.scored.assessment
         assert assessment is not None
         print(
-            f"#{result.opportunity_id} [{assessment.alert_class.value}] "
+            f"#{manual_result.opportunity_id} [{assessment.alert_class.value}] "
             f"priority={assessment.priority_score} cash={assessment.cash_score} "
             f"value={assessment.value_score} rel={assessment.relationship_score} "
             f"author={assessment.author_type.value} intent={assessment.commercial_intent.value}\n"
@@ -343,7 +367,7 @@ async def async_main(args: argparse.Namespace) -> int:
             return 0
         try:
             classifications = await app._classify_opportunities(
-                [(result.opportunity_id, opportunity)],
+                [(manual_result.opportunity_id, opportunity)],
                 purpose="manual_linkedin",
             )
         except (LLMAPIError, LLMBudgetExceeded) as exc:
@@ -362,7 +386,7 @@ async def async_main(args: argparse.Namespace) -> int:
         if classification.decision.value == "REJECT" or not classification.should_contact:
             return 0
         try:
-            brief = await app.prepare_lead(result.opportunity_id)
+            brief = await app.prepare_lead(manual_result.opportunity_id)
         except (LLMAPIError, LLMBudgetExceeded) as exc:
             print(f"Lead stored and classified; brief generation stopped safely: {exc}")
             return 0

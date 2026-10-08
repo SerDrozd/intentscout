@@ -373,6 +373,32 @@ class RadarApp:
             metadata=metadata if isinstance(metadata, dict) else {},
         )
 
+    def buyer_board(self, *, days: int = 10, limit: int = 25) -> list[tuple[str, sqlite3.Row]]:
+        """Human leads for active outreach, not automatic paid-lead claims.
+
+        Explicit hire evidence is prioritized; technical pain without a budget
+        remains labelled as unconfirmed. All items require human verification.
+        """
+        ranked: list[tuple[int, str, sqlite3.Row]] = []
+        for row in self.db.buyer_board_rows(days=days):
+            opportunity = self._row_to_opportunity(row)
+            if opportunity.metadata.get('event_type') != 'topic':
+                continue
+            analysis = self.matcher.analyze(opportunity)
+            direct = has_direct_buyer_evidence(opportunity, analysis)
+            marketplace = opportunity.metadata.get('category_kind') == 'marketplace'
+            if marketplace and direct:
+                label = 'DIRECT HIRING (payment unverified)'
+                tier = 0
+            elif not marketplace and str(row['alert_class']) == 'P1':
+                label = 'TECHNICAL PAIN (no hiring confirmed)'
+                tier = 1
+            else:
+                continue
+            ranked.append((tier, label, row))
+        ranked.sort(key=lambda item: (item[0], -int(item[2]['cash_score']), -int(item[2]['id'])))
+        return [(label, row) for _, label, row in ranked[: max(1, min(limit, 100))]]
+
     def _budget_capacity(self, *, purpose: str) -> tuple[int, float, float]:
         usage = self.db.llm_usage_summary()
         hour_cap = self.settings.max_llm_candidates_per_hour
@@ -643,7 +669,10 @@ class RadarApp:
         if analysis.excluded:
             stats.excluded += 1
             return
-        if not analysis.phrase_matches:
+        # Explicit buyer-authored hiring requests are valuable even when their
+        # wording misses our technical phrase grammar. Keep the deterministic
+        # seller/news guards: a loose hiring keyword alone is never sufficient.
+        if not analysis.phrase_matches and not has_direct_buyer_evidence(opportunity, analysis):
             return
         stats.matched += 1
 
@@ -707,6 +736,40 @@ class RadarApp:
                 opportunity.title[:100],
                 opportunity.url,
             )
+
+    def _restore_pending_alerts(
+        self,
+        pending_alerts: list[tuple[int, int, ScoredOpportunity]],
+    ) -> None:
+        """Replay recent unsent alerts after API errors, quota recovery or restart.
+
+        Re-run deterministic guards against the latest code so an old P1 that
+        is now classified as seller/news never leaks into Telegram.
+        """
+        known = {opportunity_id for _, opportunity_id, _ in pending_alerts}
+        for row in self.db.pending_alert_rows(limit=max(20, self.settings.max_alerts_per_cycle * 8)):
+            opportunity_id = int(row['id'])
+            if opportunity_id in known:
+                continue
+            opportunity = self._row_to_opportunity(row)
+            analysis = self.matcher.analyze(opportunity)
+            if analysis.excluded:
+                continue
+            assessment = assess_commercial(
+                opportunity, analysis,
+                cash_threshold=self.settings.cash_alert_threshold,
+                value_threshold=self.settings.value_alert_threshold,
+                relationship_threshold=self.settings.relationship_alert_threshold,
+            )
+            if not assessment.p0 and not self._review_alert_eligible(ScoredOpportunity(
+                opportunity=opportunity, analysis=analysis, score=0, breakdown={}, assessment=assessment,
+            )):
+                continue
+            total, breakdown = score(opportunity, analysis)
+            pending_alerts.append((assessment.priority_score, opportunity_id, ScoredOpportunity(
+                opportunity=opportunity, analysis=analysis, score=total, breakdown=breakdown, assessment=assessment,
+            )))
+            known.add(opportunity_id)
 
     async def _send_pending_alerts(
         self,
@@ -801,6 +864,8 @@ class RadarApp:
         # Fresh alert candidates get first claim on LLM quota and brief budget.
         # Background shortlist enrichment runs only after Telegram-bound work is
         # finished, so a noisy source cannot starve a later live opportunity.
+        if self.telegram.enabled:
+            self._restore_pending_alerts(pending_alerts)
         pending_alerts = await self._llm_filter_pending(pending_alerts, stats)
         await self._send_pending_alerts(pending_alerts, stats)
         await self._auto_classify_review_candidates(stats)

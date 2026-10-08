@@ -230,11 +230,11 @@ Phase 2 keeps the existing private/local Lead Radar and adds direct public Disco
 
 ```env
 MAKE_ENABLED=true
-MAKE_LOOKBACK_HOURS=48
-MAKE_TOPICS_PER_CATEGORY=20
+MAKE_LOOKBACK_HOURS=168
+MAKE_TOPICS_PER_CATEGORY=30
 N8N_ENABLED=true
-N8N_LOOKBACK_HOURS=48
-N8N_TOPICS_PER_CATEGORY=20
+N8N_LOOKBACK_HOURS=168
+N8N_TOPICS_PER_CATEGORY=30
 DISCOURSE_CONCURRENCY=6
 ```
 
@@ -792,3 +792,45 @@ python -m lead_radar reclassify --source hackernews --source bluesky --source n8
 python -X utf8 -m lead_radar shortlist --limit 50
 python -m lead_radar llm-stats
 ```
+
+
+## Buyer-first audit follow-up (v0.15.0)
+
+Use `python -X utf8 -m lead_radar buyer-board --days 10 --limit 25`
+for a *manual* public-post review queue. The labels explicitly distinguish
+direct hiring from technical pain, and **neither confirms an available paid
+contract**. Verify the buyer, budget, deadline, current availability and forum
+rules before outreach; there is no automated outreach.
+
+GitHub now searches for paid bounties or explicit contractor requests instead of
+raw generic technical issues; it may return zero results when no paid work is
+visible. Make/n8n marketplace discovery now defaults to a 7-day lookback and up to 30
+topics per category, checks recently created hiring threads when an active
+category page is full, and skips third-party service-provider replies in
+marketplace threads. Topic-author updates remain eligible. The ordinary cycle
+now also evaluates explicit buyer-authored requests whose wording did not match
+the technical phrase dictionary.
+
+Telegram still uses the Phase 8D strict LLM/buyer-evidence gate. If an alert
+was temporarily held because LLM quota/API failed, or Telegram delivery failed,
+a bounded 72-hour queue can retry it on the next cycle; it never replays
+notified, contacted or LLM-rejected items. **Do not** run the continuous mode
+for the first verification: run `once`, `buyer-board`, `shortlist`, `llm-stats`
+and inspect actual new leads first.
+
+Only patch tracked sources; `.env`, `config/feeds.local.yaml`, `data/` and `.git/`
+must remain local and private. No LinkedIn monitoring is enabled or added.
+
+After upgrading buyer-first matching on an existing database, one deliberate
+revisit helps recover posts that the previous phrase matcher ignored:
+
+```powershell
+python -m lead_radar buyer-rescan --source make --source n8n --yes
+python -m lead_radar once
+python -X utf8 -m lead_radar buyer-board --days 10 --limit 25
+```
+
+This clears only saved Make Hire Help / n8n Jobs **polling cursors**; it does
+not delete any opportunity, feedback, RSS setting or LLM history. Only visible
+threads inside source lookback windows can be rediscovered; it is not a complete
+historical recovery. Don't run repeatedly.

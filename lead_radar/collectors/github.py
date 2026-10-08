@@ -9,15 +9,19 @@ from ..models import Opportunity
 
 SEARCH_URL = "https://api.github.com/search/issues"
 
+# Buyer-first GitHub discovery. Broad technical terms produced thousands of
+# ordinary maintainer tasks, almost none of which were paid external work.
+# Deliberately require bounty, payment or contractor language in the GitHub
+# SEARCH query, then retain the strict downstream directionality classifier.
 BROAD_QUERIES = [
-    "webhook",
-    '"API integration"',
-    "oauth",
-    '"data sync"',
-    "fastapi",
-    "automation",
-    "scraper",
-    '"production API"',
+    '"paid bounty" webhook',
+    '"paid bounty" API',
+    'bounty integration',
+    'bounty python',
+    '"paid task" API',
+    '"looking for a contractor" API',
+    '"looking for a freelancer" integration',
+    '"willing to pay" webhook',
 ]
 
 

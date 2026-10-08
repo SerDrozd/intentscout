@@ -226,6 +226,14 @@ class DiscourseCommunityCollector:
 
             username = post.get("username") if isinstance(post.get("username"), str) else None
             event_type = "topic" if post_number == 1 else "reply"
+            # In hire/jobs categories the replies are overwhelmingly competing
+            # freelancers, not new job posts. Preserve the original buyer's
+            # clarifications, but advance the cursor over third-party replies.
+            if category.kind == "marketplace" and post_number > 1 and not (
+                topic_author and username == topic_author
+            ):
+                max_seen_post = max(max_seen_post, post_number)
+                continue
             direct_url = f"{self.base_url}t/{slug}/{topic_id}/{post_number}"
             out.append(
                 Opportunity(
@@ -295,6 +303,30 @@ class DiscourseCommunityCollector:
                 if not isinstance(topics, list):
                     continue
                 topics = topics[: self.max_topics_per_category]
+                if category.kind == "marketplace" and len(topics) >= self.max_topics_per_category:
+                    # Busy old threads accumulate replies and dominate default
+                    # bump sorting. A created-time view gives new job posts a
+                    # chance to enter the bounded queue. Unsupported sorting
+                    # must never disrupt the normal category fetch.
+                    try:
+                        created_payload = await self._get_json(client, category_url, params={"order": "created"})
+                        created_list = created_payload.get("topic_list")
+                        created_topics = created_list.get("topics", []) if isinstance(created_list, dict) else []
+                        if isinstance(created_topics, list):
+                            by_id = {t.get("id"): t for t in topics if isinstance(t, dict)}
+                            for topic in created_topics[: self.max_topics_per_category]:
+                                if isinstance(topic, dict) and isinstance(topic.get("id"), int):
+                                    by_id.setdefault(topic["id"], topic)
+                            # Keep bounded polling cost. Reserve half the slots
+                            # for new-by-created threads before bump-sorted ones.
+                            newer_ids = [t.get("id") for t in created_topics if isinstance(t, dict)]
+                            chosen = [by_id[i] for i in newer_ids[: self.max_topics_per_category // 2] if i in by_id]
+                            chosen_ids = {t.get("id") for t in chosen}
+                            topics = chosen + [t for t in by_id.values() if t.get("id") not in chosen_ids][
+                                : self.max_topics_per_category - len(chosen)
+                            ]
+                    except (httpx.HTTPError, ValueError, TypeError) as exc:
+                        log.debug("%s category %s created order unavailable: %s", self.name, category.key, type(exc).__name__)
 
                 async def fetch(topic: dict[str, Any]) -> list[Opportunity]:
                     async with sem:
