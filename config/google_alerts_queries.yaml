@@ -142,3 +142,54 @@ alerts:
     category_kind: business_pain
     priority: P1
     rationale: Urgent webhook failures paired with developer language can surface same-day debugging work.
+
+  # Phase 11 social discovery: public pages indexed by Google, not direct platform APIs.
+  # Indexing is incomplete and search results are NOT proof that a post is still hiring.
+  - key: social_x_api_hiring
+    query: 'site:x.com "looking for" "API developer"'
+    feed_key: google_alerts_social_x_api_hiring
+    category_kind: marketplace
+    priority: P0
+    rationale: Public indexed X hiring posts; availability and exact author must be checked manually.
+
+  - key: social_x_python_contract
+    query: 'site:x.com "need" "Python developer" freelance'
+    feed_key: google_alerts_social_x_python_contract
+    category_kind: marketplace
+    priority: P0
+    rationale: Public X requests for bounded Python work, not a live X API feed.
+
+  - key: social_reddit_api_hiring
+    query: 'site:reddit.com/r/forhire "[Hiring]" API'
+    feed_key: google_alerts_social_reddit_api_hiring
+    category_kind: marketplace
+    priority: P0
+    rationale: Reddit hiring posts discovered through Google indexing; no Reddit API scraping.
+
+  - key: social_reddit_automation_task
+    query: 'site:reddit.com "[Task]" automation webhook'
+    feed_key: google_alerts_social_reddit_automation_task
+    category_kind: marketplace
+    priority: P1
+    rationale: Potential small paid Reddit jobs; subreddit rules and legitimacy must be verified.
+
+  - key: social_threads_developer
+    query: 'site:threads.com "looking for" "Python developer"'
+    feed_key: google_alerts_social_threads_developer
+    category_kind: marketplace
+    priority: P1
+    rationale: Indexed public Threads hiring posts; Threads keyword API requires separate credentials.
+
+  - key: social_facebook_automation
+    query: 'site:facebook.com/groups "looking for" "automation developer"'
+    feed_key: google_alerts_social_facebook_automation
+    category_kind: marketplace
+    priority: P1
+    rationale: Only public/indexed Facebook group posts; private posts cannot be collected.
+
+  - key: social_telegram_n8n
+    query: 'site:t.me "looking for" "n8n developer"'
+    feed_key: google_alerts_social_telegram_n8n
+    category_kind: marketplace
+    priority: P1
+    rationale: Indexed public Telegram channel messages; private groups remain inaccessible.

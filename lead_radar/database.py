@@ -518,7 +518,12 @@ class Database:
                      AND author_type NOT IN ('SERVICE_PROVIDER', 'JOB_SEEKER',
                                              'LEARNER', 'SPAM', 'RECRUITER')
                      AND (source IN ('make','n8n','bubble','airtable','xano','flutterflow')
-                          OR (source IN ('zapier','retool','shopify') AND alert_class='P1'))
+                          OR (source IN ('zapier','retool','shopify') AND alert_class='P1')
+                          OR (source IN ('x','facebook','reddit','threads','telegram','discord','bluesky')
+                              AND alert_class IN ('P0_CASH','P0_HIGH_VALUE','P0_RELATIONSHIP','P1'))
+                          OR (source='google_alerts'
+                              AND substr(json_extract(metadata_json, '$.query_key'), 1, 7)='social_'
+                              AND alert_class IN ('P0_CASH','P0_HIGH_VALUE','P0_RELATIONSHIP','P1')))
                    ORDER BY created_at DESC, id DESC LIMIT ?""",
                 (since, max(1, min(2000, limit))),
             ).fetchall())

@@ -834,3 +834,72 @@ This clears only saved Make Hire Help / n8n Jobs **polling cursors**; it does
 not delete any opportunity, feedback, RSS setting or LLM history. Only visible
 threads inside source lookback windows can be rediscovered; it is not a complete
 historical recovery. Don't run repeatedly.
+
+## Phase 11 — social buyer discovery (v0.16.0)
+
+This release does **not** silently scrape X, Facebook, Reddit, Threads, Telegram or Discord.
+It uses the existing free public Bluesky search, optional **user-created** Google Alerts
+RSS feeds for *public, indexed* posts, and a manual importer for a specific post the user
+has already read. Google indexing is incomplete and can be delayed. A search hit does
+not establish payment, current availability or permission to contact someone.
+
+**Check the coverage plan** (safe while `run` is running):
+
+```powershell
+python -m lead_radar social-plan
+```
+
+Seven new alert definitions use `social_*` keys. Choose whichever are useful,
+create the exact query at https://www.google.com/alerts, select **RSS feed** delivery,
+and add the resulting link **locally** (do not commit or publish it):
+
+```powershell
+python -m lead_radar alerts-add --key social_x_api_hiring --url (Read-Host "Paste Google Alerts RSS URL")
+python -m lead_radar alerts-plan
+```
+
+The existing `config/feeds.local.yaml` stays gitignored. The social Google Alerts
+feeds enter the normal source pipeline and precision/LLM budget checks. **No alert
+becomes active automatically merely by installing this patch.** The public Bluesky
+search now rotates through extra high-intent Python/API/n8n/Make/webhook searches
+with existing request limits and deduplication. It does not require a token.
+
+**Capture a specific social hiring post** without an account API or auto-contact:
+
+```powershell
+# First copy the *post text* (not only its URL) to the clipboard.
+Get-Clipboard | python -X utf8 -m lead_radar social-add `
+    --platform x `
+    --url "https://x.com/someone/status/123456789" `
+    --text-file - `
+    --created-at "2026-10-08T14:30:00+03:00"
+
+python -X utf8 -m lead_radar buyer-board --days 3 --limit 30
+```
+
+Supported platform keys: `x`, `facebook`, `reddit`, `threads`, `telegram`, `discord`.
+The importer only accepts a specific post/message permalink on a listed domain.
+It rejects account profiles, subreddit listings, private Telegram invites and
+unsupported/look-alike domains. Omit `--created-at` only when the real timestamp
+is unknown; Radar then marks the time as **unverified**. Re-importing the same
+canonical permalink is a no-op. `social-add` only writes to SQLite; it never sends
+outbound messages, posts, replies or DMs. Local manual P0/P1 may invoke the same
+optional, budget-capped LLM classifier used by `linkedin-add`.
+
+`buyer-board` now includes qualified direct-buyer posts from Bluesky, manually
+imported social platforms and social Google Alerts, without treating general
+social complaints as paid opportunities. Always verify current status, owner,
+budget, contact method and community rules before writing anything. Mark contacted
+leads using `lead-action` so the next cycle does not count them as new.
+
+**Provider limitations:** X's official recent-search endpoint requires developer
+credentials and may incur usage charges. Meta retired the Facebook Groups API.
+Reddit's Responsible Builder Policy requires approval to access data through its
+API. Threads keyword search is an authenticated API. Private Discord/Telegram
+messages are intentionally outside this radar. No unsupported endpoints, account
+cookies or circumvention are built in. LinkedIn automation remains excluded.
+
+**Deployment:** stop the current `run` using `Ctrl+C`, create a feature branch,
+unzip this patch into the repo root, run tests and `mypy`/`ruff`, then commit
+and fast-forward merge. Restart `run` only after validation. Data and local RSS
+credentials are untouched by the patch.

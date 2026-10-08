@@ -382,15 +382,19 @@ class RadarApp:
         ranked: list[tuple[int, str, sqlite3.Row]] = []
         for row in self.db.buyer_board_rows(days=days):
             opportunity = self._row_to_opportunity(row)
-            if opportunity.metadata.get('event_type') != 'topic':
+            if opportunity.metadata.get('event_type') not in (None, 'topic'):
                 continue
             analysis = self.matcher.analyze(opportunity)
             direct = has_direct_buyer_evidence(opportunity, analysis)
             marketplace = opportunity.metadata.get('category_kind') == 'marketplace'
-            if marketplace and direct:
+            social = opportunity.source in {'x', 'facebook', 'reddit', 'threads', 'telegram', 'discord', 'bluesky'} or (
+                opportunity.source == 'google_alerts'
+                and str(opportunity.metadata.get('query_key') or '').startswith('social_')
+            )
+            if (marketplace or social) and direct:
                 label = 'DIRECT HIRING (payment unverified)'
                 tier = 0
-            elif not marketplace and str(row['alert_class']) == 'P1':
+            elif not marketplace and not social and str(row['alert_class']) == 'P1':
                 label = 'TECHNICAL PAIN (no hiring confirmed)'
                 tier = 1
             else:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from .google_alerts import (
 )
 from .llm import LLMAPIError, LLMBudgetExceeded
 from .manual import build_linkedin_opportunity
+from .social import SOCIAL_PLATFORMS, build_social_opportunity
 from .optimizer import advise_roi
 
 
@@ -69,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     schedule_plan.add_argument("--days", type=int, default=None, help="ROI window; defaults to ADAPTIVE_WINDOW_DAYS")
     alerts_plan = sub.add_parser("alerts-plan", help="Show buyer-intent Google Alerts setup and ROI status")
     alerts_plan.add_argument("--days", type=int, default=30, help="ROI window for configured Google Alerts")
+    sub.add_parser("social-plan", help="Show social discovery coverage and Google Alerts that need activation")
     alerts_add = sub.add_parser("alerts-add", help="Add or update one real Google Alerts RSS URL locally")
     alerts_add.add_argument("--key", required=True, help="Query key from alerts-plan")
     alerts_add.add_argument("--url", required=True, help="Real Google Alerts RSS feed URL")
@@ -96,6 +99,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="UTF-8 file containing the copied post body; use '-' to read stdin",
     )
+    social_add = sub.add_parser(
+        "social-add", help="Import a copied X/Facebook/Reddit/Threads/Telegram/Discord post; no scraping or outbound messages",
+    )
+    social_add.add_argument("--platform", choices=SOCIAL_PLATFORMS, required=True)
+    social_add.add_argument("--url", required=True, help="Direct public post permalink")
+    social_add.add_argument("--author", default=None)
+    social_add.add_argument("--title", default=None)
+    social_add.add_argument("--created-at", default=None, help="ISO 8601; strongly recommended for freshness")
+    social_add.add_argument("--query-key", default=None)
+    social_body = social_add.add_mutually_exclusive_group(required=True)
+    social_body.add_argument("--text", default=None)
+    social_body.add_argument("--text-file", default=None, help="UTF-8 file or '-' for piped stdin")
     reclassify = sub.add_parser("reclassify", help="Recompute commercial scores without sending alerts")
     reclassify.add_argument("--source", action="append", dest="sources", help="Limit to a source; repeatable")
     sub.add_parser("telegram-id", help="Show chat IDs seen by the configured Telegram bot")
@@ -168,7 +183,12 @@ async def async_main(args: argparse.Namespace) -> int:
         if not board_items:
             print("No qualified fresh public posts in the current buyer board. No paid work is confirmed.")
         for label, row in board_items:
-            print(f"#{row['id']} [{label}] [{row['source']}] {_age_label(str(row['created_at']))} "
+            try:
+                board_meta = json.loads(str(row['metadata_json'])) if 'metadata_json' in row.keys() else {}
+            except (ValueError, TypeError):
+                board_meta = {}
+            age = "time=unverified" if isinstance(board_meta, dict) and board_meta.get('created_at_assumed') else _age_label(str(row['created_at']))
+            print(f"#{row['id']} [{label}] [{row['source']}] {age} "
                   f"cash={row['cash_score']} llm={row['llm_decision']}")
             print(f"  {row['title']}")
             print(f"  {row['url']}")
@@ -297,6 +317,21 @@ async def async_main(args: argparse.Namespace) -> int:
             )
         print("Real feed URLs belong only in the gitignored local RSS config.")
         return 0
+    if args.command == "social-plan":
+        queries = tuple(item for item in load_google_alert_queries(settings.google_alerts_queries_path)
+                        if item.key.startswith("social_"))
+        feeds = combined_feed_definitions(settings.rss_feeds_path, settings.rss_local_feeds_path)
+        plan = build_google_alert_plan(queries, feeds)
+        print("Social discovery: Bluesky public search=automatic (when enabled); X/Reddit/Threads/Facebook/Telegram via")
+        print("Google Alerts=opt-in only; Discord and all six networks can be imported with social-add.")
+        print("No authenticated scraping, no social DMs, no LinkedIn automation, no paid platform API calls.")
+        for social_plan_row in plan:
+            print(
+                f"{social_plan_row.priority} {social_plan_row.key} "
+                f"status={social_plan_row.status} query={social_plan_row.query}"
+            )
+        print("For each desired query, create a Google Alert with RSS delivery, then use alerts-add --key ... --url ...")
+        return 0
     if args.command == "alerts-add":
         queries = load_google_alert_queries(settings.google_alerts_queries_path)
         query_by_key = {query.key: query for query in queries}
@@ -314,7 +349,7 @@ async def async_main(args: argparse.Namespace) -> int:
             "The local file is gitignored; run alerts-plan to verify ACTIVE status."
         )
         return 0
-    if args.command == "linkedin-add":
+    if args.command in {"linkedin-add", "social-add"}:
         if args.text_file == "-":
             import sys
             body = sys.stdin.read()
@@ -322,32 +357,38 @@ async def async_main(args: argparse.Namespace) -> int:
             try:
                 body = Path(args.text_file).read_text(encoding="utf-8")
             except OSError as exc:
-                print(f"Could not read LinkedIn post text file: {exc}")
+                print(f"Could not read copied post text file: {exc}")
                 return 2
         else:
             body = str(args.text or "")
         try:
-            opportunity = build_linkedin_opportunity(
-                url=str(args.url),
-                body=body,
-                title=args.title,
-                author=args.author,
-                created_at=args.created_at,
-                query_key=args.query_key,
-            )
+            if args.command == "linkedin-add":
+                opportunity = build_linkedin_opportunity(
+                    url=str(args.url), body=body, title=args.title,
+                    author=args.author, created_at=args.created_at, query_key=args.query_key,
+                )
+            else:
+                opportunity = build_social_opportunity(
+                    platform=str(args.platform), url=str(args.url), body=body,
+                    title=args.title, author=args.author, created_at=args.created_at,
+                    query_key=args.query_key,
+                )
         except ValueError as exc:
             print(str(exc))
             return 2
+        post_type = "LinkedIn" if args.command == "linkedin-add" else str(args.platform).upper()
 
+        if getattr(opportunity, "metadata", {}).get("created_at_assumed"):
+            print("Post time is unknown: treated as newly copied, not verified fresh.")
         manual_result = app.ingest_manual(opportunity)
         if manual_result.status == "duplicate":
-            print("This LinkedIn post is already in the radar database.")
+            print(f"This {post_type} post is already in the radar database.")
             return 0
         if manual_result.status == "excluded":
-            print("LinkedIn post was excluded by hard safety/noise rules.")
+            print(f"{post_type} post was excluded by hard safety/noise rules.")
             return 0
         if manual_result.status == "no_match":
-            print("LinkedIn post has no technical/buyer signal strong enough for this radar.")
+            print(f"{post_type} post has no technical/buyer signal strong enough for this radar.")
             return 0
         assert manual_result.opportunity_id is not None and manual_result.scored is not None
         assessment = manual_result.scored.assessment
@@ -368,7 +409,7 @@ async def async_main(args: argparse.Namespace) -> int:
         try:
             classifications = await app._classify_opportunities(
                 [(manual_result.opportunity_id, opportunity)],
-                purpose="manual_linkedin",
+                purpose="manual_social" if args.command == "social-add" else "manual_linkedin",
             )
         except (LLMAPIError, LLMBudgetExceeded) as exc:
             print(f"Stored; LLM review stopped safely: {exc}")
@@ -450,12 +491,20 @@ async def async_main(args: argparse.Namespace) -> int:
             return 2
         if not results:
             print("No unclassified P0/P1 candidates in the current shortlist.")
-        for item in results:
-            reason = item.rejection_reason if item.decision.value == "REJECT" else item.problem_summary
+        for classification_result in results:
+            reason = (
+                classification_result.rejection_reason
+                if classification_result.decision.value == "REJECT"
+                else classification_result.problem_summary
+            )
             print(
-                f"#{item.opportunity_id} {item.decision.value} confidence={item.confidence} "
-                f"author={item.author_type.value} intent={item.commercial_intent.value} "
-                f"contact={item.should_contact} fit={item.technical_fit} payment={item.payment_intent}\n"
+                f"#{classification_result.opportunity_id} "
+                f"{classification_result.decision.value} confidence={classification_result.confidence} "
+                f"author={classification_result.author_type.value} "
+                f"intent={classification_result.commercial_intent.value} "
+                f"contact={classification_result.should_contact} "
+                f"fit={classification_result.technical_fit} "
+                f"payment={classification_result.payment_intent}\n"
                 f"  {reason}"
             )
         print(app.db.llm_usage_summary())

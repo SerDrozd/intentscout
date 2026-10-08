@@ -36,6 +36,16 @@ QUERY_FAMILIES: tuple[BlueskyQueryFamily, ...] = (
     BlueskyQueryFamily("paid_project", '"paid project" automation'),
     BlueskyQueryFamily("need_backend", '"need backend"'),
     BlueskyQueryFamily("client_project", '"client project" developer'),
+    # High-intent buyer search families; rotated with the existing public API search.
+    BlueskyQueryFamily("hiring_python", '"hiring" "python"'),
+    BlueskyQueryFamily("hiring_api", '"hiring" "API developer"'),
+    BlueskyQueryFamily("n8n_expert", '"looking for" "n8n"'),
+    BlueskyQueryFamily("make_expert", '"looking for" "Make.com"'),
+    BlueskyQueryFamily("paid_automation", '"paid" "automation"'),
+    BlueskyQueryFamily("webhook_contract", '"webhook" "contractor"'),
+    BlueskyQueryFamily("small_api_task", '"small project" "API"'),
+    BlueskyQueryFamily("freelance_backend", '"freelance" "backend"'),
+    BlueskyQueryFamily("need_python", '"need someone" "python"'),
 )
 
 
@@ -146,6 +156,7 @@ class BlueskyCollector:
                         created_at=created,
                         metadata={
                             "platform": "bluesky",
+                            "event_type": "topic",
                             "query_family": family.key,
                             "query": family.query,
                             "author_did": author.get("did"),

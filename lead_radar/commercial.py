@@ -891,6 +891,14 @@ def _google_alert_direct_buyer_signal(opportunity: Opportunity) -> bool:
     )
     if _has_any(title_text, direct_role_terms):
         return True
+    # Hiring language on a direct social post may have a technology between
+    # "hiring" and "developer" ("hiring a Python API developer"). Keep this
+    # exception tied to an actual social URL and the technical-scope guard above.
+    social_post_hosts = {"x.com", "twitter.com", "reddit.com", "threads.com", "threads.net", "facebook.com", "t.me"}
+    if (host in social_post_hosts or any(host.endswith("." + domain) for domain in social_post_hosts)) and (
+        DIRECT_BUYER_ROLE_RE.search(title_text) or ("[hiring]" in title_text and host.endswith("reddit.com"))
+    ):
+        return True
 
     first_person_buyer_terms = (
         "i need help", "we need help",
