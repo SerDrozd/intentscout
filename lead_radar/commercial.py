@@ -108,6 +108,13 @@ SELLER_TERMS = (
     "open to project based work",
     "open to projects",
     "gain commercial experience",
+    # Marketplace posts from people offering to assist or gain experience
+    # are not requests to hire a contractor.
+    "open to collabs",
+    "not looking for paid gigs",
+    "looking for hands-on, real-world experience",
+    "want to build my skills",
+    "looking to gain experience",
 )
 
 SERVICE_PROVIDER_TERMS = (

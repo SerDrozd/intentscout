@@ -515,6 +515,11 @@ class Database:
                    FROM opportunities
                    WHERE status='new' AND created_at >= ?
                      AND llm_decision <> 'REJECT' AND alert_class <> 'REJECT'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM lead_briefs AS lb
+                         WHERE lb.opportunity_id = opportunities.id
+                           AND lb.contact_strategy = 'IGNORE'
+                     )
                      AND author_type NOT IN ('SERVICE_PROVIDER', 'JOB_SEEKER',
                                              'LEARNER', 'SPAM', 'RECRUITER')
                      AND (source IN ('make','n8n','bubble','airtable','xano','flutterflow')
@@ -555,6 +560,11 @@ class Database:
                     FROM opportunities
                     WHERE status='new'
                       AND (alert_class LIKE 'P0_%' OR alert_class='P1')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM lead_briefs AS lb
+                          WHERE lb.opportunity_id = opportunities.id
+                            AND lb.contact_strategy = 'IGNORE'
+                      )
                       {source_clause}
                       {llm_clause}
                     ORDER BY
@@ -1042,6 +1052,11 @@ class Database:
                     WHERE status='new'
                       AND (alert_class LIKE 'P0_%' OR alert_class='P1')
                       AND llm_decision <> 'REJECT'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM lead_briefs AS lb
+                          WHERE lb.opportunity_id = opportunities.id
+                            AND lb.contact_strategy = 'IGNORE'
+                      )
                       {source_clause}
                     ORDER BY
                         CASE WHEN alert_class LIKE 'P0_%' THEN 0 ELSE 1 END,
