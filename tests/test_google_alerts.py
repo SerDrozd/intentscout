@@ -29,9 +29,9 @@ def test_query_pack_has_unique_prioritized_entries() -> None:
 
 
 def test_google_alert_url_validation_rejects_placeholders_and_non_google() -> None:
-    assert is_google_alert_feed_url("https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED") is True
-    assert is_google_alert_feed_url("https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED") is False
-    assert is_google_alert_feed_url("https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED") is False
+    assert is_google_alert_feed_url("https://www.google.com/alerts/feeds/123/456") is True
+    assert is_google_alert_feed_url("http://www.google.com/alerts/feeds/123/456") is False
+    assert is_google_alert_feed_url("https://www.google.com/alerts/feeds/REPLACE_WITH_YOUR_FEED") is False
     assert is_google_alert_feed_url("https://example.com/alerts/feeds/123/456") is False
 
 
@@ -41,7 +41,7 @@ def test_alerts_add_writes_only_local_feed_and_plan_becomes_active(tmp_path: Pat
     public_path.write_text("feeds: []\n", encoding="utf-8")
     query = load_google_alert_queries(ROOT / "config" / "google_alerts_queries.yaml")[0]
 
-    upsert_google_alert_feed(local_path, query, "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED")
+    upsert_google_alert_feed(local_path, query, "https://www.google.com/alerts/feeds/123/456")
 
     local_feeds = load_feed_definitions(local_path)
     assert len(local_feeds) == 1
@@ -79,7 +79,7 @@ async def test_rss_collector_merges_local_overlay_without_public_secret(tmp_path
         status_code = 304
         headers: dict[str, str] = {}
         content = b""
-        request = type("Request", (), {"url": "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"})()
+        request = type("Request", (), {"url": "https://www.google.com/alerts/feeds/123/456"})()
 
         def raise_for_status(self) -> None:
             return None
@@ -105,7 +105,7 @@ async def test_rss_collector_merges_local_overlay_without_public_secret(tmp_path
     local_path = tmp_path / "feeds.local.yaml"
     public_path.write_text("feeds: []\n", encoding="utf-8")
     query = load_google_alert_queries(ROOT / "config" / "google_alerts_queries.yaml")[0]
-    upsert_google_alert_feed(local_path, query, "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED")
+    upsert_google_alert_feed(local_path, query, "https://www.google.com/alerts/feeds/123/456")
 
     collector = RSSCollector(
         Database(tmp_path / "radar.db"),
@@ -113,7 +113,7 @@ async def test_rss_collector_merges_local_overlay_without_public_secret(tmp_path
         extra_config_paths=(local_path,),
     )
     assert await collector.collect() == []
-    assert Client.requested == ["https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"]
+    assert Client.requested == ["https://www.google.com/alerts/feeds/123/456"]
 
 
 @pytest.mark.asyncio
@@ -157,7 +157,7 @@ async def test_google_alert_rss_unwraps_target_and_preserves_query_context(tmp_p
   - key: google_alerts_crm
     source: google_alerts
     name: CRM buyer alert
-    url: https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED
+    url: https://www.google.com/alerts/feeds/123/456
     enabled: true
     category_kind: business_pain
     lookback_hours: 168

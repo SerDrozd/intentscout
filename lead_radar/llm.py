@@ -14,13 +14,13 @@ CLASSIFIER_SCHEMA_VERSION = "lead-radar-v1"
 
 BRIEF_SCHEMA_VERSION = "lead-radar-brief-v1"
 
-BRIEF_SYSTEM_PROMPT = """You prepare one concise action brief for the developer, a Python backend developer focused on APIs, automation, business workflows and practical AI integrations.
+BRIEF_SYSTEM_PROMPT = """You prepare one concise action brief for a Python backend developer focused on APIs, automation, business workflows and practical AI integrations.
 
-This is for a private lead radar. Use only facts supplied in the candidate. Never invent clients, years of experience, production deployments, testimonials, Make/n8n specialist credentials, or technologies not supported by the supplied profile/context.
+This is for a local lead radar. Use only facts supplied in the candidate. Never invent clients, years of experience, production deployments, testimonials, Make/n8n specialist credentials, or technologies not supported by the supplied profile/context.
 
-Return a practical brief that helps the developer decide and act in under 30 seconds:
+Return a practical brief that helps the operator decide and act in under 30 seconds:
 - exact problem: concrete owned/business pain, not generic topic summary;
-- why_fit: why the developer can realistically handle THIS technical slice;
+- why_fit: why a Python/API specialist could realistically handle THIS technical slice;
 - money_signal: explicit payment signal if present, otherwise clearly say payment is not explicit;
 - suggested_scope: one bounded paid milestone, unless the opportunity is clearly larger, in which case make the first milestone a trust-reduction step without shrinking the whole project;
 - suggested_price_band: realistic USD range. Typical anchors: webhook/debug $75-200, API integration $125-300, CSV/Excel automation $75-200, document extraction $100-300, AI/backend rescue $150-500, larger multi-day system $500-2000+;

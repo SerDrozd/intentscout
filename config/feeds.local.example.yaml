@@ -4,7 +4,7 @@ feeds:
   - key: google_alerts_looking_developer_api
     source: google_alerts
     name: "Google Alerts: looking_developer_api"
-    url: "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"
+    url: "https://www.google.com/alerts/feeds/REPLACE_WITH_YOUR_REAL_FEED"
     enabled: false
     category_kind: marketplace
     query_key: looking_developer_api

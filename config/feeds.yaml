@@ -27,7 +27,7 @@ feeds:
   - key: google_alerts_example
     source: google_alerts
     name: Google Alerts buyer-intent example
-    url: "https://www.google.com/alerts/feeds/EXAMPLE_USER/EXAMPLE_FEED"
+    url: "https://www.google.com/alerts/feeds/REPLACE_WITH_YOUR_FEED"
     enabled: false
     category_kind: business_pain
     lookback_hours: 168

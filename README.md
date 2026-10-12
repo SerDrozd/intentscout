@@ -1,905 +1,240 @@
-# Lead Radar v3.0 Phase 9 - Buyer Discovery Expansion
+<div align="center">
 
-Phase 9 changes the discovery strategy from "scan more technical pain" to "prioritize public places where a buyer is explicitly trying to hire or pay someone now." It keeps the Phase 8D precision gates intact.
+# Buyer Intent Radar
 
-## What Phase 9 adds
+**Find the technical problem. Verify the buyer. Decide whether to act.**
 
-- **Protected buyer-heavy polling lanes** so historical ROI cannot starve the sources that have the best chance of producing an immediate client:
-  - n8n Jobs / Help me Build;
-  - Make Hire Help;
-  - Airtable Jobs Board;
-  - Retool;
-  - Xano Find a Xano Expert;
-  - FlutterFlow job postings.
-- **Retool Forum** direct public Discourse monitoring:
-  - Discussion;
-  - Workflows;
-  - App Building.
-- **Xano Community** public marketplace monitoring for `Find a Xano Expert`.
-- **FlutterFlow Community** public job-posting monitoring.
-- **LinkedIn-assisted manual ingest** with no LinkedIn scraping, cookies, login automation, browser automation, or private endpoints.
-- Additional high-intent Google Alerts queries for `DM me`, contractor/freelancer, paid task, fixed-price API integration and urgent webhook work.
-- `schedule-plan` now shows when a buyer-heavy source is protected from adaptive down-throttling.
-- `once` now prints the full Phase 8D funnel (`commercial`, `review_candidates`, `alert_candidates`, `llm_held`) instead of only basic counters.
+A local-first Python system for discovering, evaluating and tracking public requests for **API development, integrations, webhooks and workflow automation**.
 
-## Protected buyer sources
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
+![CLI](https://img.shields.io/badge/Interface-CLI-24292F)
+![Privacy](https://img.shields.io/badge/Approach-Local--first-16803C)
+![Tests](https://img.shields.io/badge/Checks-Pytest%20%7C%20Ruff%20%7C%20Mypy-555555)
 
-By default:
+[Getting started](#quick-start) · [Architecture](#how-it-works) · [Commands](#command-reference) · [Privacy](#privacy--security) · [Limitations](#limitations)
 
-```env
-PROTECTED_BUYER_SOURCES=n8n,make,airtable,retool,xano,flutterflow
-PROTECTED_BUYER_MAX_POLL_CYCLES=1
-```
-
-The adaptive optimizer still records ROI and recommendations, but these sources run at least once per configured maximum poll interval. With the default `1`, they are checked every radar cycle.
-
-This is deliberately different from GitHub/raw HN: a low historical conversion rate should not cause the radar to miss a fresh explicit hiring post in a buyer-heavy category.
-
-## New public source settings
-
-```env
-RETOOL_ENABLED=true
-RETOOL_LOOKBACK_HOURS=168
-RETOOL_TOPICS_PER_CATEGORY=25
-
-XANO_ENABLED=true
-XANO_LOOKBACK_HOURS=336
-XANO_TOPICS_PER_SECTION=30
-
-FLUTTERFLOW_ENABLED=true
-FLUTTERFLOW_LOOKBACK_HOURS=168
-FLUTTERFLOW_TOPICS_PER_SECTION=30
-```
-
-All three adapters are read-only. They use public pages/Discourse JSON only and do not log in.
-
-## Safe LinkedIn-assisted workflow
-
-Lead Radar still does **not** scrape LinkedIn.
-
-Use LinkedIn manually with `Posts -> Recent`, copy the post text, then hand the post to the local radar:
-
-```powershell
-Get-Clipboard | python -m lead_radar linkedin-add `
-  --url "https://www.linkedin.com/posts/..." `
-  --author "Post author" `
-  --query-key "looking_python_dm" `
-  --text-file -
-```
-
-You can also pass `--text "..."` or a UTF-8 file with `--text-file post.txt`.
-
-Optional exact post time:
-
-```powershell
---created-at "2026-10-08T11:25:00+03:00"
-```
-
-When omitted, the radar assumes the post was discovered now and marks that assumption in metadata.
-
-`linkedin-add`:
-
-1. validates that the URL is on LinkedIn;
-2. applies the same seller guard, deterministic matcher and commercial scoring;
-3. stores the lead in SQLite;
-4. if it is P0/P1 and the LLM is configured, runs the precision classifier immediately;
-5. for a contact-worthy PASS/REVIEW, generates the same bounded outreach brief/draft used by Telegram.
-
-This gives the useful part of LinkedIn automation without risking the account with automated search or authenticated scraping.
-
-## Google Alerts additions
-
-Run:
-
-```powershell
-python -m lead_radar alerts-plan
-```
-
-Phase 9 adds high-intent query keys including:
-
-- `dm_python_developer`
-- `dm_api_developer`
-- `webhook_contractor`
-- `backend_freelancer`
-- `paid_n8n_help`
-- `fixed_api_integration`
-- `paid_python_task`
-- `urgent_webhook_developer`
-
-Create only the alerts you want in Google Alerts with RSS delivery, then add each real URL locally:
-
-```powershell
-python -m lead_radar alerts-add --key dm_api_developer --url "REAL_GOOGLE_ALERT_RSS_URL"
-```
-
-Real Google Alerts feed URLs stay only in the gitignored `config/feeds.local.yaml`.
-
-## Recommended Phase 9 runtime profile
-
-Raw Hacker News has produced a large amount of low-commercial-value volume. For a money-first run, prefer targeted HN search and disable the raw firehose locally:
-
-```env
-HN_ENABLED=false
-HN_ALGOLIA_ENABLED=true
-```
-
-Keep the protected buyer lanes enabled.
-
-## Verify Phase 9
-
-```powershell
-ruff check .
-mypy lead_radar
-python -m pytest -q
-python -m compileall -q lead_radar
-git diff --check
-
-python -m lead_radar schedule-plan
-python -m lead_radar alerts-plan
-python -m lead_radar once
-```
-
-Do not wait 12 hours for validation. Inspect the first few cycles and confirm that buyer-heavy sources are being polled every cycle while background sources remain adaptive.
+</div>
 
 ---
 
-# Lead Radar v2.3 Phase 6B - Config-driven RSS/Atom discovery
+## Why this exists
 
-Phase 6B adds a generic public RSS/Atom collector so new feed sources can be added in YAML without writing a new Python adapter. It keeps the same deterministic matcher, commercial scoring, SQLite dedupe, LLM precision gate and Telegram controls.
+Finding technical discussions is easy. Finding someone who **actually wants to hire a developer and may pay for a specific fix** is not.
 
-## Phase 6B adds
+Buyer Intent Radar explores public sources, identifies relevant language, applies commercial and suitability filters, and helps a human review the strongest candidates. It is designed to distinguish:
 
-- RSS 2.0, Atom 1.0 and common RDF/RSS item parsing using the Python standard library;
-- `config/feeds.yaml` for feed definitions;
-- per-feed lookback, item caps, category kind and source labels;
-- ETag / Last-Modified conditional requests;
-- per-feed publication cursors with a small overlap window;
-- per-feed minimum polling intervals so slow feeds are not hammered by the 3-minute radar cycle;
-- bundled public Jobicy freelance/contract engineering feeds as the first marketplace RSS source;
-- a disabled Google Alerts example that can be enabled locally by pasting a personal RSS URL;
-- RSS marketplace items reuse the same buyer/seller/recruiter and LLM gates as existing communities.
+| Signal | Interpretation |
+| --- | --- |
+| “Need a developer to fix our webhook integration; paid task.” | Potential buyer — verify scope, budget and availability |
+| “My API returns a 401; what am I missing?” | Technical question — **not** necessarily a paid opportunity |
+| “I build n8n workflows. Available for projects.” | Service provider — **not** a buyer |
+| “Hiring locally; onsite work and language requirements apply.” | Hiring intent, but possibly **not eligible** |
 
-No new API key is required for the bundled public feeds. Jobicy feeds are hard-limited in `feeds.yaml` to one request per feed per hour.
+**The goal is an actionable shortlist, not a high volume of keyword matches.** Any inferred budget, competition or score remains an estimate until confirmed at the source.
 
-## New environment variables
+## What it can do
 
-```env
-RSS_ENABLED=true
-RSS_FEEDS_CONFIG=./config/feeds.yaml
-RSS_CONCURRENCY=4
+- **Multi-source discovery** — public Hacker News search, GitHub issues, Bluesky public search, selected SaaS communities and configurable RSS/Atom feeds.
+- **Buyer-oriented matching** — technical keyword groups, intent aliases, contextual phrases and rule-based scoring.
+- **Commercial triage** — separate potential customers from sellers, educational questions and incompatible requirements; maintain P0/P1/P2/reject classifications.
+- **Optional LLM review** — classify candidates and prepare concise, evidence-based action briefs, with configurable daily/monthly usage controls.
+- **Local tracking** — persist collected records, decisions, feedback and outreach state in SQLite; avoid repeat notifications.
+- **Optional Telegram notifications** — notify only when explicitly configured. The tool **does not** automatically message prospective customers.
+- **Read-only diagnostics** — inspect the stored source funnel without mutating the database or calling any external model.
+
+## Development history
+
+This repository includes the **actual development commit sequence** rather than a single squashed source snapshot. The main branch retains **18 development commits dated 6–9 October 2026**, followed by a public-release cleanup. Two original alternative commits are preserved in `archive/rss-alternative` and `archive/roi-alternative`.
+
+For privacy, the public history was reconstructed from the original commit graph: personal author emails, private RSS identifiers and operator-specific text were replaced across **every historical commit**. Original dates, subjects and parent relationships are preserved. As a result, historical commit **SHA IDs differ** from those of the local private repository. No personal SQLite database or credentials are included in any public revision.
+
+See [History and privacy](docs/history-and-privacy.md) for verification details and [Publishing safely](docs/publishing-safely.md) before adding a remote.
+
+## How it works
+
+```mermaid
+flowchart TD
+    S[Public APIs & communities] --> C[Collectors]
+    RSS[Configured RSS / Alerts] --> C
+    MAN[Manual public-post import] --> C
+    C --> M[Technical & intent matching]
+    M --> SC[Commercial scoring & buyer/seller checks]
+    SC --> DB[(Local SQLite)]
+    DB --> R[Buyer board / shortlist]
+    R --> L{LLM review enabled?}
+    L -->|No| H[Human review]
+    L -->|Yes| G[Optional precision review & brief]
+    G --> H
+    H --> A[Manual outreach & tracked outcomes]
+    DB -. read-only .-> D[Funnel diagnostic]
+    G -. optional .-> T[Telegram alerts]
 ```
 
-## Add another feed
+The pipeline has deliberately different layers: *technical relevance* is not the same as *hiring intent*, and hiring intent is not proof of *budget or suitability*.
 
-Edit `config/feeds.yaml`:
+## Public-source coverage
 
-```yaml
-feeds:
-  - key: my_feed
-    source: my_source
-    name: My buyer-intent feed
-    url: "https://example.com/feed.xml"
-    enabled: true
-    category_kind: business_pain
-    lookback_hours: 168
-    max_items: 50
-    min_poll_minutes: 15
-```
+| Source | Collection approach |
+| --- | --- |
+| Hacker News | Public HN/Algolia search |
+| GitHub | Public issue search; optional token for authenticated API rate limits |
+| Bluesky | Public search endpoints |
+| Make, n8n | Public Discourse discussions |
+| Shopify, Airtable, Zapier, Bubble, Retool, Xano, FlutterFlow | Selected public community endpoints/pages |
+| RSS / Google Alerts | Public feed definitions plus **local, untracked** personal feed URLs |
+| LinkedIn, Reddit, X, Facebook, Threads, Telegram, Discord | **Manual import of publicly visible post text**; not private-session scraping |
 
-Use `category_kind: marketplace` only for feeds where posts are actually hiring/contract/project listings.
+Source reach, freshness and reliability vary. A working collector does **not** guarantee that a source currently contains paid work.
 
-## Verify Phase 6B
+## Quick start
+
+**Requirements:** Python 3.11+; internet access for live collectors. No paid API or Telegram token is required for a basic run.
+
+**Windows PowerShell**
 
 ```powershell
-ruff check .
-mypy lead_radar
-python -m pytest -q
-python -m compileall -q lead_radar
-git diff --check
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+python -m lead_radar --help
 python -m lead_radar once
+python -m lead_radar buyer-board --days 3 --limit 20
+python -m lead_radar shortlist --limit 20
 ```
 
-A normal cycle now includes a line such as `rss fetched N item(s)`.
-
----
-
-# Lead Radar v1.7 Phase 2 - Make + n8n Direct Buyer Sources
-
-Phase 2 keeps the existing private/local Lead Radar and adds direct public Discourse adapters for the two most commercially useful automation communities in the current plan. No account or API key is required for these adapters.
-
-## Phase 2 adds
-
-- **Make Community** direct monitoring:
-  - `Hire Help` marketplace;
-  - `Questions` for production/business pain.
-- **n8n Community** direct monitoring:
-  - `Jobs`;
-  - `Help me Build my Workflow`.
-- public Discourse JSON ingestion with conservative retries and `Retry-After` handling;
-- per-topic SQLite cursors so unchanged threads are not re-fetched every cycle;
-- fresh reply events, including old threads that become active again;
-- explicit `is_topic_author` metadata so buyer clarifications can be separated from service-provider replies;
-- source-aware commercial scoring:
-  - Make `Hire Help` topic starters are treated as buyer-oriented marketplace signals;
-  - n8n `[For Hire]` / seller posts are rejected;
-  - generic full-time employment posts are rejected from the money radar;
-  - fresh OP replies such as `still looking`, `budget is`, `DM me`, or `contractor disappeared` can reactivate a thread;
-- source-level failure isolation remains unchanged: one forum failure does not stop HN/GitHub or the other forum.
-
-## New environment variables
-
-```env
-MAKE_ENABLED=true
-MAKE_LOOKBACK_HOURS=168
-MAKE_TOPICS_PER_CATEGORY=30
-N8N_ENABLED=true
-N8N_LOOKBACK_HOURS=168
-N8N_TOPICS_PER_CATEGORY=30
-DISCOURSE_CONCURRENCY=6
-```
-
-The category list is intentionally small. We are prioritizing buyer-heavy areas first instead of crawling every forum category.
-
-## Verify Phase 2
-
-```powershell
-ruff check .
-mypy lead_radar
-python -m pytest -q
-python -m compileall -q lead_radar
-git diff --check
-python -m lead_radar once
-```
-
-A normal cycle can now log collectors named `make` and `n8n` alongside `hackernews` and `github`.
-
----
-
-
-A $0-first Python radar for finding fresh public technical pain / buying-intent signals before they become crowded freelance listings.
-
-## What this MVP does
-
-- Monitors **new Hacker News items including comments** via the official HN Firebase API.
-- Searches recent public **GitHub Issues** using a small set of broad source queries.
-- Runs every candidate through **250 exact phrases plus a compositional intent grammar** in `config/keywords.yaml`.
-- Applies hard excludes, soft penalties, proximity-based paraphrase rules, source-aware commercial-intent scoring and deterministic ranking.
-- Stores matches + exact triggering phrases in **SQLite**.
-- Sends only the **top N high-score alerts per cycle** to Telegram (`MAX_ALERTS_PER_CYCLE=5` by default).
-- Telegram buttons can mark an opportunity **Ignored** or **Contacted**, and the action is saved to SQLite.
-- Works without Telegram: alerts are logged to the console and all matches remain in SQLite.
-
-## v1.2 calibration changes
-
-v1.1 was intentionally broad and a real replay showed it could classify ordinary GitHub engineering tickets as "HIGH INTENT". v1.2 tightens that behavior:
-
-- rule matches require the technical anchor and pain/intent trigger to occur within 180 characters;
-- generic words such as `production` or `client` no longer automatically count as strong buyer context;
-- GitHub backlog/spec/task language receives a penalty;
-- GitHub issues without an explicit buyer/help signal receive a commercial-intent penalty;
-- alerts are sorted and capped per cycle;
-- Telegram sends are spaced and `429 retry_after` is handled;
-- Telegram HTTP errors are sanitized so the bot token is not printed in exception URLs.
-
-The 250 exact phrases are unchanged.
-
-## v1.4 compositional matching
-
-v1.4 expands recall without adding 1,000 brittle full-sentence strings. It keeps the original 250 exact phrases and adds:
-
-- **236 technical aliases/synonyms** across API, integrations, webhooks, OAuth/auth, sync/data, automation, scraping, backend/production and MVP/shipping;
-- **311 intent/context aliases** for help, failures, build requests, questions, commercial intent, ownership, business context and manual-process pain;
-- **order-independent proximity matching**: the technical term and intent/pain term may appear before or after each other;
-- three-part context rules such as `our/we + webhook + failing`, `our/we + integration + trying to connect`, or `we + manual process + takes hours`;
-- word-boundary matching so short tokens do not match inside unrelated words.
-
-The pairwise grammar alone represents roughly **48,000 surface-form equivalents**, before three-part combinations are counted. It remains deterministic and requires no LLM, embeddings or paid API.
-
-At startup the radar prints matcher coverage, for example:
-
-```text
-Matcher coverage: exact=250 technical_aliases=236 intent_aliases=311 pair_variant_equivalents=48380
-```
-
-## Requirements
-
-- Python 3.11+ recommended
-- Internet access
-- Optional GitHub token (recommended for more comfortable API limits)
-- Optional Telegram bot token/chat ID
-
-## Install
+**macOS / Linux**
 
 ```bash
-cd technical-api-problem-radar-mvp
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
 cp .env.example .env
-```
-
-## First run (no tokens required)
-
-GitHub public search and HN can run without credentials. Telegram is optional.
-
-```bash
 python -m lead_radar once
-python -m lead_radar recent --limit 20
-python -m lead_radar stats
+python -m lead_radar buyer-board --days 3 --limit 20
 ```
 
-The SQLite DB is created at `data/radar.db` by default.
+The first run creates a local SQLite database at `data/radar.db` and requests public sources enabled in `.env`. Depending on network availability, some source requests may fail or return zero matches; review the console output before drawing conclusions.
 
-## Continuous mode
+> **Safe starting configuration:** the supplied `.env.example` disables LLM calls and leaves Telegram credentials empty. Do not enable paid models without reviewing the model ID, pricing settings and usage limits.
 
-```bash
-python -m lead_radar run
-```
+### Configuration
 
-Default poll interval is 180 seconds. Change `POLL_INTERVAL_SECONDS` in `.env`.
+Edit your local `.env` (already excluded from Git). Common options:
 
-Telegram is deliberately rate-limited to at least ~1 message/second per chat and the client honors Bot API `retry_after` on 429 flood-control responses.
-
-## GitHub token (recommended)
-
-Put a token into:
-
-```env
-GITHUB_TOKEN=
-```
-
-The MVP only reads public issue-search results; it does not modify GitHub.
-
-## Telegram setup
-
-1. Create a bot with **@BotFather** and put its token in `.env`:
-
-```env
+```dotenv
+RADAR_DB=./data/radar.db
+HN_ALGOLIA_ENABLED=true
+GITHUB_ENABLED=true
+MAKE_ENABLED=true
+N8N_ENABLED=true
+RSS_ENABLED=true
+LLM_ENABLED=false
 TELEGRAM_BOT_TOKEN=
-```
-
-2. Send `/start` (or any message) to your new bot.
-3. Run:
-
-```bash
-python -m lead_radar telegram-id
-```
-
-4. Copy the shown ID into:
-
-```env
 TELEGRAM_CHAT_ID=
 ```
 
-5. Run `python -m lead_radar once` again.
+Public, non-account-specific keyword and feed definitions are in `config/`. To add a personal Google Alerts feed, use the CLI's `alerts-plan` / `alerts-add` workflow: real feed URLs belong in **`config/feeds.local.yaml`**, never `config/feeds.yaml` or Git. See `config/feeds.local.example.yaml` for the format.
 
-High-score opportunities will now arrive with **Open / Ignore / Contacted** buttons. Callback actions are consumed on subsequent radar cycles.
+LLM classification is optional. To use it, set `LLM_ENABLED=true`, supply a valid `OPENAI_API_KEY` and model identifier in your **local** `.env`, and verify the budget/pricing fields. Cost controls are application estimates, not a billing guarantee.
 
-## How matching works
+## Command reference
 
-The original 250 exact phrases are grouped into 10 categories:
+| Command | Purpose |
+| --- | --- |
+| `python -m lead_radar once` | Execute one collection and scoring cycle |
+| `python -m lead_radar run` | Poll continuously with configured intervals |
+| `python -m lead_radar recent --limit 20` | Inspect stored matches |
+| `python -m lead_radar buyer-board --days 3 --limit 20` | Review buyer-like records |
+| `python -m lead_radar shortlist --limit 20` | Show prioritized actionable candidates |
+| `python -m lead_radar stats` | Local database summary |
+| `python -m lead_radar roi --days 30 --by source` | Source-level tracked outcomes |
+| `python -m lead_radar optimize --days 30` | Read-only source/query recommendations |
+| `python -m lead_radar alerts-plan` | Review suggested Google Alerts queries |
+| `python -m lead_radar social-plan` | Preview supported social discovery routes |
+| `python -m lead_radar prepare --id 123` | Optional, configured LLM action brief for an existing lead |
 
-- `explicit_help_hire`
-- `api_failures`
-- `integrations`
-- `webhooks`
-- `auth_oauth`
-- `sync_data`
-- `automation_workflows`
-- `scraping_extraction`
-- `backend_production`
-- `ship_fix_mvp`
+CLI options and commands may evolve; `python -m lead_radar --help` is the source of truth.
 
-The source collectors are intentionally broad. Exact phrases and grammar aliases are **not** network searches: they are local classifier layers. v1.4 can recognize reordered/synonymous expressions such as `our webhook has been failing; could use a hand`, even when no original 250 phrase appears verbatim.
+### Commercial funnel diagnostic
 
-## Default scoring
+The standalone audit reads an **existing** SQLite database in read-only mode. It reports source activity, stored fresh original topics, reply/comment proportions, buyer-like heuristics and bounded manual-review candidates.
 
-Examples of positive signals:
-
-- very fresh item: up to +6
-- explicit willingness to pay: +7
-- `need someone`: +6
-- concrete technical problem: +3
-- strong business/buyer context: +3
-- urgency: +3
-- strong technical fit: +4
-- direct contact path: +1
-
-Hard-excluded homework / interview-noise is discarded. Soft educational or already-solved signals get penalties.
-
-Default alert threshold: **13**.
-
-## SQLite tables
-
-- `opportunities` — matched leads and scores
-- `matches` — every exact phrase/category that triggered
-- `source_state` — collector cursors + Telegram update offset
-- `actions` — feedback such as `ignored` / `contacted`
-
-Useful query:
-
-```sql
-SELECT m.phrase,
-       COUNT(*) AS matches,
-       SUM(CASE WHEN o.status='contacted' THEN 1 ELSE 0 END) AS contacted
-FROM matches m
-JOIN opportunities o ON o.id = m.opportunity_id
-GROUP BY m.phrase
-ORDER BY contacted DESC, matches DESC;
+```powershell
+python -m lead_radar.funnel_audit --db .\data\radar.db --hours 24 --limit 10
 ```
 
-That is the foundation for learning which signals actually lead to conversations and money.
+For structured output:
 
-## Important MVP limitations
+```bash
+python -m lead_radar.funnel_audit --db ./data/radar.db --hours 24 --format json
+```
 
-1. **GitHub is noisy.** v1.2 therefore separates technical fit from commercial intent: internal specs/backlog items get penalties and generic GitHub technical issues are stored but normally do not alert.
-2. **HN initial bootstrap** scans only the latest configured item IDs (`HN_BOOTSTRAP_ITEMS=300`). Increase it if needed.
-3. **No Reddit collector yet.** Reddit access is changing, so it should be an isolated adapter rather than a core dependency.
-4. **No LLM classifier.** This is intentional. We first collect real false positives/positives and only add an LLM if deterministic rules leave a meaningful gap.
-5. **No dashboard.** SQLite + Telegram are enough to validate whether the radar creates paid conversations.
+The diagnostic makes **no outbound network calls, API calls or database writes**. It cannot recover items rejected before being stored, and it cannot verify whether an external buyer is still accepting proposals. See [diagnostic methodology](docs/funnel-diagnostic.md).
 
-## Recommended first validation
-
-Run it continuously for several days and mark interesting items `Contacted` / bad ones `Ignored`. Then inspect which categories/phrases produce useful leads. Only after that add more sources or AI.
-
-## v1.3 precision gate
-
-v1.3 separates **technical relevance** from **commercial/contact intent**. A high score alone no longer sends Telegram alerts. GitHub requires an explicit money/contract signal for Telegram; Hacker News requires commercial intent or an owned first-person problem with a real request for help/business context. Job-post-like HN comments are suppressed. Rule matching also uses word boundaries, preventing false matches such as `import` inside `important` and `developer to` inside `developer tools`.
-
-Cycle logs now include `intent_filtered=...`: items that scored above the threshold but were blocked by the commercial-intent gate. They remain stored in SQLite.
-
-
-## v1.4 alert behavior
-
-The high-precision v1.3 source gate remains. v1.4 broadens *recognition* rather than blindly lowering the Telegram threshold:
-
-- Hacker News can alert on explicit help, owned build requests, owned business problems and manual-process pain.
-- GitHub still requires a real money/contract/bounty signal for Telegram because ordinary GitHub issues are overwhelmingly project backlog.
-- All technically relevant matches remain in SQLite even when the alert gate suppresses them.
-
-This means adding synonyms increases recall without returning to the v1.1 flood of ordinary GitHub tickets.
-
-## v1.5: buyer direction calibration
-
-v1.5 keeps the v1.4 compositional matcher and its broad technical recall, but separates commercial direction from generic commercial vocabulary.
-
-Key changes:
-
-- seller/self-promotion posts such as `Open to contract work` and `SEEKING FREELANCE WORK` are rejected;
-- generic `contract work`, `freelance work`, `paid work`, `day rate`, `hourly rate` and bare `bounty` are weak mentions, not buyer intent;
-- GitHub alerts require directional buyer language such as `looking for a contractor`, `need a freelancer`, `willing to pay`, or a real budget/payment signal;
-- completed/claimed bounty receipts are suppressed;
-- manual-process alerts require stronger evidence such as repeated work, time cost, business ownership, or an automation request;
-- technical matching coverage from v1.4 is unchanged.
-
-This makes the architecture deliberately two-stage:
+## Project layout
 
 ```text
-technical relevance / recall
-        ↓
-buyer-vs-seller intent direction
-        ↓
-source-specific alert gate
-        ↓
-Telegram
-```
-## Phase 3: cheap LLM precision gate
-
-Phase 3 adds an optional OpenAI structured classifier after deterministic commercial scoring.
-It is deliberately a precision layer, not the primary scorer:
-
-- deterministic hard rejects still win;
-- the model may suppress a high-confidence false positive before Telegram;
-- low-confidence model output fails open to deterministic scoring;
-- the model does not promote weak P2 rows directly to P0;
-- ingestion, SQLite storage and deterministic scoring continue if the API is unavailable or a budget is exhausted.
-
-Current default model: `gpt-6-luna` via the Responses API with Structured Outputs.
-The model and token prices are configuration values so they can be changed without code changes.
-
-Local `.env` settings:
-
-```env
-LLM_ENABLED=true
-OPENAI_API_KEY=
-LLM_MODEL=gpt-6-luna
-DAILY_LLM_BUDGET_USD=0.03
-MONTHLY_LLM_BUDGET_USD=0.75
-MAX_LLM_CANDIDATES_PER_HOUR=10
-MAX_LLM_CANDIDATES_PER_DAY=50
-LLM_BATCH_SIZE=5
-MAX_POST_CHARS=5000
-LLM_MAX_OUTPUT_TOKENS=1200
-LLM_INPUT_PRICE_PER_MTOK=0.10
-LLM_CACHED_INPUT_PRICE_PER_MTOK=0.01
-LLM_CACHE_WRITE_PRICE_PER_MTOK=0.125
-LLM_OUTPUT_PRICE_PER_MTOK=0.50
+buyer-intent-radar/
+├── lead_radar/
+│   ├── collectors/       # Public-source adapters
+│   ├── app.py            # Orchestration
+│   ├── commercial.py     # Buyer/intent filtering
+│   ├── matcher.py        # Technical and linguistic matching
+│   ├── scoring.py        # Rule-based relevance scores
+│   ├── database.py       # SQLite persistence
+│   ├── llm.py            # Optional precision gate
+│   ├── telegram.py       # Optional notifications
+│   └── funnel_audit.py   # Read-only local diagnostics
+├── config/               # Public example/query definitions
+├── tests/                # Unit and regression tests
+├── docs/                 # Methodology and privacy notes
+├── scripts/              # Public-release safety check
+├── .env.example          # Credentials deliberately blank
+└── pyproject.toml
 ```
 
-Never paste the API key into source code or commit it. `.env` is git-ignored.
+## Development and validation
 
-Useful commands:
-
-```powershell
-python -m lead_radar shortlist --limit 20
-python -m lead_radar llm-classify --limit 20
-python -m lead_radar llm-stats
+```bash
+python -m pip install -e '.[dev]'
+ruff check .
+mypy lead_radar
+python -m pytest -q
+python -m compileall -q lead_radar
+python scripts/check_public_release.py
 ```
 
-`llm-classify` only sends currently actionable deterministic P0/P1 rows that have not already been classified, unless `--force` is supplied. It stores a structured result and exact API token usage in SQLite.
+All tests use synthetic data or mocked external requests; the test suite does not require real customer records, Telegram credentials or LLM calls. GitHub Actions runs linting, typing, tests and the public-release check on pushes and pull requests.
 
-A live P0 alert is automatically checked by the LLM gate when `LLM_ENABLED=true` and `OPENAI_API_KEY` is configured. P1 rows are also classified opportunistically within the same hard candidate and dollar caps, but they are not automatically sent to Telegram unless the normal deterministic alert policy allows it.
+## Privacy & security
 
-SQLite additions:
+The published project must not contain personal lead databases, tracked opportunities, outreach history, raw logs, local contact information, API keys, private Google Alerts RSS URLs, real `.env` files or developer machine paths.
 
-- `llm_classifications`: latest structured classification per opportunity;
-- `llm_usage`: request, token and estimated-cost accounting;
-- `opportunities.llm_decision`: `NOT_RUN`, `PASS`, `REVIEW`, or `REJECT`.
+This release is a **fresh, curated source export**, with **no previous Git history**. The file exclusions and `scripts/check_public_release.py` provide defense in depth, not proof that every possible secret is detectable. Before any public push, inspect the exact staged file list and diff; set your Git author email to your GitHub **no-reply address** so commit metadata does not disclose your personal email. Full checklist: [publishing safely](docs/publishing-safely.md).
 
-`reclassify` invalidates stale LLM decisions because deterministic evidence may have changed.
+This repository uses only public interfaces and permitted manual imports; it does not attempt to bypass private login sessions, rate limits or platform access controls. Follow each source's published terms.
 
-## Phase 4: action briefs and Telegram money cards
+## License
 
-For a shortlisted lead, generate or reuse a compact action brief:
+No software license is included in this release. Public visibility does not itself grant permission to reuse or redistribute the code. A license can be selected separately.
 
-```powershell
-python -m lead_radar prepare --id 2127
-```
+## Limitations
 
-The brief contains:
-- exact problem;
-- why the task fits the developer's real Python/backend/API/automation skill set;
-- money/payment signal;
-- one bounded first milestone;
-- suggested USD price band;
-- contact strategy (`PUBLIC_REPLY`, `DM`, `EMAIL`, `PUBLIC_REPLY_THEN_DM`, `APPLY_FORM`, `IGNORE`);
-- a short personalized English draft.
+- **Buyer intent is inferred**, not independently verified. No automatic system can promise an open paid contract.
+- **Historical competition counts can become stale.** Check the original thread before reaching out.
+- **Funnel diagnostics describe stored items only.** Pre-insertion exclusions are outside their visibility.
+- **Coverage is incomplete.** Public endpoints can change or reject requests; not all platforms are searched directly.
+- **LLM judgments may be wrong.** The human operator is responsible for qualification, communication and the final decision.
+- **No automatic outreach.** The software is a discovery and review assistant, not an email/DM spam bot.
 
-Drafts are validated deterministically. Em/en dashes are removed, and generic phrases such as `I came across your post`, `I am excited`, `I believe I would be a great fit`, `cutting-edge`, `seamless`, and `robust solutions` are rejected.
+---
 
-For a live P0 lead that survives the deterministic and LLM precision gates, Lead Radar tries to create the same brief before sending Telegram. If the OpenAI budget is exhausted or the API fails, ingestion continues and Telegram falls back to a shorter deterministic card rather than dropping the lead.
+<div align="center">
 
-`python -m lead_radar llm-stats` now also includes `detailed_generations_today`.
+**Built around one principle: fewer unverified leads, more informed decisions.**
 
+*Independent project. Not affiliated with any of the data-source platforms.*
 
-## Phase 5: additional public buyer/pain communities
-
-Enabled by default with no new credentials:
-
-- `hubspot`: HubSpot Community -> Develop, Build & Integrate -> APIs & Integrations.
-- `shopify`: Shopify Developer Community -> Webhooks & Events, Fulfillment & Inventory, Products & Orders APIs, Authentication & Access.
-- `bubble`: Bubble Forum -> Jobs / Freelance.
-
-All three reuse the existing public Discourse JSON collector and per-topic reply cursors. Non-author replies are stored for competition/context but cannot become interruptive buyer events. Bubble Jobs/Freelance is treated as a mixed marketplace: seller/self-promo and structured employment posts remain deterministic rejects. HubSpot/Shopify are business-pain sources and require buyer/business context before P0/P1.
-
-Airtable and Zapier are intentionally not scraped in this phase. Their current community platforms do not expose the same stable public Discourse JSON contract; they should be added through the later generic web/RSS discovery adapter rather than a brittle one-off scraper.
-
-
-## Phase 5A repair notes
-
-- HubSpot `APIs & Integrations` uses the still-working canonical Discourse JSON path `c/hubspot-developer-support/apis-integrations/80.json`. The newer browser-facing category slug does not expose the same JSON endpoint reliably.
-- Bubble `Jobs / Freelance` is low-volume, so its bootstrap lookback defaults to 168 hours (7 days). Normal freshness scoring still downranks older posts; replies after bootstrap remain event-driven by the per-topic cursor.
-
-## Phase 5B: safe public-page community adapter
-
-Some commercially useful communities do not expose a stable public JSON/RSS API. Phase 5B adds a conservative HTML adapter that uses ordinary public GET requests only: no login, cookies, CAPTCHA bypass, browser automation, or private endpoints.
-
-Enabled sources:
-
-- **HubSpot APIs & Integrations** through its public category/topic HTML because HubSpot's JSON endpoint returned HTTP 403 from the local collector;
-- **Airtable Jobs Board** as a low-frequency buyer marketplace (14-day bootstrap window);
-- **Zapier Code & Webhooks / Troubleshooting / How Do I** as business-pain sources (7-day bootstrap window).
-
-The adapter discovers same-domain topic links, fetches only a bounded number of pages, extracts structured JSON-LD/meta/article content where available, requires a real publication timestamp, and stores only topic starters. Fresh reply monitoring remains on the dedicated Discourse adapters for Make/n8n/Shopify/Bubble; Phase 5B intentionally does not pretend generic HTML reply parsing is reliable.
-
-```env
-AIRTABLE_ENABLED=true
-AIRTABLE_LOOKBACK_HOURS=336
-AIRTABLE_TOPICS_PER_SECTION=20
-ZAPIER_ENABLED=true
-ZAPIER_LOOKBACK_HOURS=168
-ZAPIER_TOPICS_PER_SECTION=15
-WEB_FETCH_CONCURRENCY=4
-```
-
-## Phase 6A: HN targeted search + Bluesky public search
-
-Phase 6A adds two no-credential discovery sensors while keeping the existing deterministic/LLM gates:
-
-- `hn_algolia`: targeted Hacker News `search_by_date` queries over stories and comments, with per-query timestamp cursors and a five-minute overlap for late indexing. Opportunities are stored under the existing `hackernews` source so direct HN fetches still deduplicate against them.
-- `bluesky`: public `app.bsky.feed.searchPosts` queries against the Bluesky AppView. Query families rotate across cycles and only fresh local-lookback results are emitted. No Bluesky account or token is required.
-
-HubSpot public-page polling is disabled by default after repeatable HTTP 403 responses from the local client. It remains available behind `HUBSPOT_ENABLED=true` for future experiments, but it no longer wastes time or logs warnings in the normal loop.
-
-## Phase 7A: feedback and ROI tracking
-
-Lead Radar now stores collector run metrics and can track the sales outcome of each opportunity.
-This turns the system from a one-way detector into a measurable acquisition loop.
-
-Record actions from the CLI:
-
-```powershell
-python -m lead_radar lead-action --id YOUR_ID --action contacted --note "public reply"
-python -m lead_radar lead-action --id YOUR_ID --action replied
-python -m lead_radar lead-action --id YOUR_ID --action proposal
-python -m lead_radar lead-action --id YOUR_ID --action won --revenue 250
-```
-
-Supported stages are `new`, `contacted`, `replied`, `proposal`, `won`, `lost`, and `ignored`.
-Telegram alerts also expose `Replied` and `Won` buttons in addition to `Ignore` and `Contacted`.
-
-Source-level ROI for the last 30 days:
-
-```powershell
-python -m lead_radar roi --days 30
-```
-
-Query/feed/category attribution:
-
-```powershell
-python -m lead_radar roi --days 30 --by query
-python -m lead_radar roi --days 30 --by query --source bluesky
-```
-
-The report shows lead volume, P0/P1 counts, contacted/replied/proposal/won/lost/ignored stages,
-recorded revenue, collector fetched volume (source view), and attributable LLM cost for requests
-made after this phase was installed. Query attribution uses `query_family`, `broad_query`,
-`feed_key`, or `category_key` from opportunity metadata.
-
-
-### Undo accidental feedback
-
-If a feedback command was run by mistake, remove the manually recorded funnel history and reset the lead to `new`:
-
-```powershell
-python -m lead_radar lead-action --id YOUR_ID --action reset --yes
-```
-
-`reset` only removes manual funnel actions/revenue for that opportunity. It preserves the opportunity, matches, LLM classification, lead brief, and notification history.
-
-## Phase 7B: adaptive source/query advisor (dry-run only)
-
-Lead Radar can now turn the Phase 7A funnel/ROI data into conservative source and query recommendations without changing any configuration, polling schedule, query rotation, or LLM budget.
-
-Source-level advice:
-
-```powershell
-python -m lead_radar optimize --days 30
-```
-
-Query/feed/category advice:
-
-```powershell
-python -m lead_radar optimize --days 30 --by query
-python -m lead_radar optimize --days 30 --by query --source github
-```
-
-Possible recommendations are:
-
-- `BOOST` — strong downstream evidence; currently requires multiple wins or substantial reply/proposal evidence;
-- `KEEP` — useful signal or a single win, but not enough evidence to increase allocation automatically;
-- `WATCH` — mixed/weak discovery signal without enough negative evidence to reduce priority;
-- `DEPRIORITIZE` — enough evidence that the segment consumes attention without producing useful signal;
-- `DISABLE_CANDIDATE` — very large zero-signal sample; advisory only, never an automatic disable;
-- `INSUFFICIENT_DATA` — fewer than 20 observed leads, regardless of an exciting individual outcome.
-
-Safeguards are intentionally conservative:
-
-- fewer than 20 observed leads always remains `INSUFFICIENT_DATA`;
-- one recorded win can move a segment to `KEEP`, but cannot make it `BOOST`;
-- replies/proposals/wins outweigh raw lead volume;
-- large zero-P0/P1 samples can be deprioritized, but source-level disable advice requires a much larger sample than query-level advice;
-- P0/P1 discovery yield alone can justify `KEEP`, not `BOOST`;
-- the command is a pure advisor. It never rewrites `.env`, YAML, query lists, polling intervals, source enable flags, or LLM budgets.
-
-Every run ends with an explicit dry-run message so recommendations cannot be confused with applied changes. Adaptive scheduling and automatic budget/query weighting should only be enabled later, after enough real `contacted -> replied -> proposal -> won/lost` outcomes have accumulated.
-
-## Phase 8A: safe adaptive scheduling + Google Alerts query pack
-
-Phase 7B remains the source of truth for recommendations, but continuous `run` mode can now use those recommendations as **reversible in-memory scheduling hints**. The scheduler never edits `.env`, YAML, source enable flags, or LLM budgets, and it never permanently disables a source/query.
-
-Defaults:
-
-```env
-ADAPTIVE_SCHEDULING_ENABLED=true
-ADAPTIVE_WINDOW_DAYS=30
-ADAPTIVE_REFRESH_CYCLES=10
-```
-
-Preview the current runtime plan without collecting anything:
-
-```powershell
-python -m lead_radar schedule-plan
-```
-
-The conservative cadence mapping is:
-
-- `BOOST`, `KEEP`, `INSUFFICIENT_DATA`: poll every cycle;
-- `WATCH`: every 2 cycles;
-- `DEPRIORITIZE`: every 3 cycles;
-- `DISABLE_CANDIDATE`: every 8 cycles, never permanently disabled.
-
-For query-driven collectors (`hn_algolia`, Bluesky, GitHub), the same advice also reduces or expands the number of queries run per scheduled cycle. Unknown or low-sample queries keep a normal exploration weight, so new query families are not starved before they gather evidence. Even a `DISABLE_CANDIDATE` query retains a non-zero exploration slot.
-
-This behavior matters only inside a long-running process. A fresh `python -m lead_radar once` starts at cycle zero, so every enabled source still gets a chance to run; query-heavy sources may use the safer adaptive query budget immediately.
-
-To return to the old fixed schedule at any time:
-
-```env
-ADAPTIVE_SCHEDULING_ENABLED=false
-```
-
-### Google Alerts query pack
-
-`config/google_alerts_queries.yaml` contains buyer-intent alert suggestions, but Lead Radar does not create alerts or invent account-specific RSS URLs. Create an alert yourself, choose RSS delivery, then add the real feed URL to `config/feeds.yaml` using the existing RSS collector. No Python code is required.
-
-## Phase 8B: buyer-signal Google Alerts overlay
-
-Google Alerts can now be added without placing account-specific RSS URLs in tracked files. The tracked query pack lives in `config/google_alerts_queries.yaml`; real feed URLs are written to `config/feeds.local.yaml`, which is gitignored.
-
-Preview the buyer-intent pack and current setup status:
-
-```powershell
-python -m lead_radar alerts-plan
-```
-
-After creating one alert in Google Alerts and selecting RSS delivery, add its real feed URL locally:
-
-```powershell
-python -m lead_radar alerts-add --key YOUR_QUERY_KEY --url "YOUR_REAL_GOOGLE_ALERTS_RSS_URL"
-python -m lead_radar alerts-plan
-```
-
-The local RSS overlay is merged after `config/feeds.yaml`, so local entries can safely override a tracked template without editing or exposing the tracked file. Google Alerts opportunities carry `query_key` and `search_query` metadata, so `roi --by query` attributes downstream contact/reply/win data to the actual buyer-intent query instead of only to the feed filename.
-
-`alerts-add` validates that the URL is HTTPS and points to a Google Alerts `/alerts/feeds/` path. It never creates an alert in the Google account and never commits the feed URL.
-
-## Google Alerts precision guard (v0.12.0)
-
-Google Alerts entries are now treated as discovery wrappers rather than authoritative page authorship. The RSS collector unwraps Google redirect URLs locally, preserves query attribution, and records the target host. The LLM classifier receives the target URL plus alert query context, so marketplace branding such as `- Freelancer` is not mistaken for a service-provider author. Google Alerts results without direct buyer language are capped at P2, which suppresses news/editorial matches while retaining direct help/hiring/project requests.
-
-## Phase 8D: precision, protected LLM quota, and review alerts (v0.13.0)
-
-Phase 8D is a production tuning pass based on a full-day run where background HN candidates exhausted the daily candidate count while Telegram stayed mostly silent. It changes alert allocation rather than adding more sources.
-
-Key safeguards:
-
-- first-person service offers with seller-side price/scope/deliverable language are hard-rejected before LLM scoring;
-- raw `hackernews:default` comments cannot become P1/P0 without direct buyer evidence;
-- Bluesky `willing_pay` results require an actual technical buyer request, preventing generic politics/commodity uses of the phrase;
-- live Telegram candidates are LLM-gated and sent before background shortlist enrichment;
-- background LLM work keeps a protected reserve for fresh alert candidates;
-- when LLM is unavailable/out of quota, only a deterministic P0 with direct buyer evidence may fail open; inferred P0s and P1s are held;
-- a narrow, fresh P1 lane can reach Telegram as `👀 WORTH CHECKING` after the LLM gate;
-- cycle logs now expose commercial/review candidates and held candidates so the funnel is observable.
-
-Recommended defaults:
-
-```env
-MAX_LLM_CANDIDATES_PER_HOUR=12
-MAX_LLM_CANDIDATES_PER_DAY=100
-LLM_ALERT_RESERVE_PER_HOUR=4
-LLM_ALERT_RESERVE_PER_DAY=25
-REVIEW_ALERTS_ENABLED=true
-REVIEW_ALERT_MIN_PRIORITY=64
-REVIEW_ALERT_MIN_FRESHNESS=68
-```
-
-After upgrading an existing database, re-run deterministic scoring for the noisy sources before restarting continuous mode:
-
-```powershell
-python -m lead_radar reclassify --source hackernews --source bluesky --source n8n
-python -X utf8 -m lead_radar shortlist --limit 50
-python -m lead_radar llm-stats
-```
-
-
-## Buyer-first audit follow-up (v0.15.0)
-
-Use `python -X utf8 -m lead_radar buyer-board --days 10 --limit 25`
-for a *manual* public-post review queue. The labels explicitly distinguish
-direct hiring from technical pain, and **neither confirms an available paid
-contract**. Verify the buyer, budget, deadline, current availability and forum
-rules before outreach; there is no automated outreach.
-
-GitHub now searches for paid bounties or explicit contractor requests instead of
-raw generic technical issues; it may return zero results when no paid work is
-visible. Make/n8n marketplace discovery now defaults to a 7-day lookback and up to 30
-topics per category, checks recently created hiring threads when an active
-category page is full, and skips third-party service-provider replies in
-marketplace threads. Topic-author updates remain eligible. The ordinary cycle
-now also evaluates explicit buyer-authored requests whose wording did not match
-the technical phrase dictionary.
-
-Telegram still uses the Phase 8D strict LLM/buyer-evidence gate. If an alert
-was temporarily held because LLM quota/API failed, or Telegram delivery failed,
-a bounded 72-hour queue can retry it on the next cycle; it never replays
-notified, contacted or LLM-rejected items. **Do not** run the continuous mode
-for the first verification: run `once`, `buyer-board`, `shortlist`, `llm-stats`
-and inspect actual new leads first.
-
-Only patch tracked sources; `.env`, `config/feeds.local.yaml`, `data/` and `.git/`
-must remain local and private. No LinkedIn monitoring is enabled or added.
-
-After upgrading buyer-first matching on an existing database, one deliberate
-revisit helps recover posts that the previous phrase matcher ignored:
-
-```powershell
-python -m lead_radar buyer-rescan --source make --source n8n --yes
-python -m lead_radar once
-python -X utf8 -m lead_radar buyer-board --days 10 --limit 25
-```
-
-This clears only saved Make Hire Help / n8n Jobs **polling cursors**; it does
-not delete any opportunity, feedback, RSS setting or LLM history. Only visible
-threads inside source lookback windows can be rediscovered; it is not a complete
-historical recovery. Don't run repeatedly.
-
-## Phase 11 — social buyer discovery (v0.16.0)
-
-This release does **not** silently scrape X, Facebook, Reddit, Threads, Telegram or Discord.
-It uses the existing free public Bluesky search, optional **user-created** Google Alerts
-RSS feeds for *public, indexed* posts, and a manual importer for a specific post the user
-has already read. Google indexing is incomplete and can be delayed. A search hit does
-not establish payment, current availability or permission to contact someone.
-
-**Check the coverage plan** (safe while `run` is running):
-
-```powershell
-python -m lead_radar social-plan
-```
-
-Seven new alert definitions use `social_*` keys. Choose whichever are useful,
-create the exact query at https://www.google.com/alerts, select **RSS feed** delivery,
-and add the resulting link **locally** (do not commit or publish it):
-
-```powershell
-python -m lead_radar alerts-add --key social_x_api_hiring --url (Read-Host "Paste Google Alerts RSS URL")
-python -m lead_radar alerts-plan
-```
-
-The existing `config/feeds.local.yaml` stays gitignored. The social Google Alerts
-feeds enter the normal source pipeline and precision/LLM budget checks. **No alert
-becomes active automatically merely by installing this patch.** The public Bluesky
-search now rotates through extra high-intent Python/API/n8n/Make/webhook searches
-with existing request limits and deduplication. It does not require a token.
-
-**Capture a specific social hiring post** without an account API or auto-contact:
-
-```powershell
-# First copy the *post text* (not only its URL) to the clipboard.
-Get-Clipboard | python -X utf8 -m lead_radar social-add `
-    --platform x `
-    --url "https://x.com/someone/status/123456789" `
-    --text-file - `
-    --created-at "2026-10-08T14:30:00+03:00"
-
-python -X utf8 -m lead_radar buyer-board --days 3 --limit 30
-```
-
-Supported platform keys: `x`, `facebook`, `reddit`, `threads`, `telegram`, `discord`.
-The importer only accepts a specific post/message permalink on a listed domain.
-It rejects account profiles, subreddit listings, private Telegram invites and
-unsupported/look-alike domains. Omit `--created-at` only when the real timestamp
-is unknown; Radar then marks the time as **unverified**. Re-importing the same
-canonical permalink is a no-op. `social-add` only writes to SQLite; it never sends
-outbound messages, posts, replies or DMs. Local manual P0/P1 may invoke the same
-optional, budget-capped LLM classifier used by `linkedin-add`.
-
-`buyer-board` now includes qualified direct-buyer posts from Bluesky, manually
-imported social platforms and social Google Alerts, without treating general
-social complaints as paid opportunities. Always verify current status, owner,
-budget, contact method and community rules before writing anything. Mark contacted
-leads using `lead-action` so the next cycle does not count them as new.
-
-**Provider limitations:** X's official recent-search endpoint requires developer
-credentials and may incur usage charges. Meta retired the Facebook Groups API.
-Reddit's Responsible Builder Policy requires approval to access data through its
-API. Threads keyword search is an authenticated API. Private Discord/Telegram
-messages are intentionally outside this radar. No unsupported endpoints, account
-cookies or circumvention are built in. LinkedIn automation remains excluded.
-
-**Deployment:** stop the current `run` using `Ctrl+C`, create a feature branch,
-unzip this patch into the repo root, run tests and `mypy`/`ruff`, then commit
-and fast-forward merge. Restart `run` only after validation. Data and local RSS
-credentials are untouched by the patch.
+</div>

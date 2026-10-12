@@ -277,7 +277,7 @@ class DiscourseCommunityCollector:
     async def collect(self) -> list[Opportunity]:
         timeout = httpx.Timeout(20.0)
         headers = {
-            "User-Agent": "the developer-Lead-Radar/0.3 (public Discourse monitoring; local personal use)",
+            "User-Agent": "BuyerIntentRadar/0.16 (public Discourse monitoring; read-only)",
             "Accept": "application/json",
         }
         headers.update(self.request_headers)

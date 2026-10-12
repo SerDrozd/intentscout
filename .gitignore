@@ -1,6 +1,38 @@
+# Credentials / local configuration
 .env
 .env.*
 !.env.example
+config/feeds.local.yaml
+**/*credentials*.json
+**/*secrets*.json
+*.pem
+*.p12
+*.key
+
+# Local customer data, states, exports and backups
+data/
+data-v1.1-noise/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db-shm
+*.db-wal
+*.log
+*.jsonl
+*.csv
+*.tsv
+funnel-audit-output.json
+reports/
+exports/
+backups/
+*.rar
+*.zip
+*.7z
+
+# Python and editor files
 .venv/
 venv/
 __pycache__/
@@ -8,11 +40,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.db
-*.db-*
-*.sqlite
-*.sqlite3
-data-v1.1-noise/
-
-# Local RSS/Google Alerts feed URLs may contain account-specific identifiers.
-config/feeds.local.yaml
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+.DS_Store
