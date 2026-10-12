@@ -1,127 +1,89 @@
-<div align="center">
-
 # IntentScout
 
-**Find the technical problem. Verify the buyer. Decide whether to act.**
+[![CI](https://github.com/SerDrozd/intentscout/actions/workflows/quality.yml/badge.svg)](https://github.com/SerDrozd/intentscout/actions/workflows/quality.yml)
 
-A local-first Python system for discovering, evaluating and tracking public requests for **API development, integrations, webhooks and workflow automation**.
+Local-first discovery and review of technical hiring signals.
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
-![CLI](https://img.shields.io/badge/Interface-CLI-24292F)
-![Privacy](https://img.shields.io/badge/Approach-Local--first-16803C)
-![Tests](https://img.shields.io/badge/Checks-Pytest%20%7C%20Ruff%20%7C%20Mypy-555555)
+IntentScout is a Python CLI that searches public discussions for people who may need help with APIs, integrations, webhooks, or automation. It collects posts, checks whether they look like requests for paid work, and keeps the results in a local SQLite database for review.
 
-[Getting started](#quick-start) · [Architecture](#how-it-works) · [Commands](#command-reference) · [Privacy](#privacy--security) · [Limitations](#limitations)
+The hard part is not finding posts that mention Python or an API. It is separating a possible client from someone asking a free technical question, advertising their own services, or hiring for work that is not a good fit.
 
-</div>
+IntentScout helps with that filtering. It does not contact anyone automatically, and a high score does not mean a job or budget has been confirmed.
 
----
+## What it does
 
-## Why this exists
+- Searches Hacker News, GitHub issues, Bluesky, selected SaaS communities, and configured RSS feeds.
+- Matches technical terms alongside phrases that suggest someone is looking for help.
+- Filters obvious service offers, general questions, and unsuitable hiring requirements.
+- Ranks stored candidates by technical fit, commercial signals, and freshness.
+- Offers optional LLM review and short action briefs for selected leads.
+- Tracks decisions and outreach status locally so the same lead is not repeatedly treated as new.
+- Supports optional Telegram alerts and read-only funnel diagnostics.
 
-Finding technical discussions is easy. Finding someone who **actually wants to hire a developer and may pay for a specific fix** is not.
-
-IntentScout explores public sources, identifies relevant language, applies commercial and suitability filters, and helps a human review the strongest candidates. It is designed to distinguish:
-
-| Signal | Interpretation |
-| --- | --- |
-| “Need a developer to fix our webhook integration; paid task.” | Potential buyer — verify scope, budget and availability |
-| “My API returns a 401; what am I missing?” | Technical question — **not** necessarily a paid opportunity |
-| “I build n8n workflows. Available for projects.” | Service provider — **not** a buyer |
-| “Hiring locally; onsite work and language requirements apply.” | Hiring intent, but possibly **not eligible** |
-
-**The goal is an actionable shortlist, not a high volume of keyword matches.** Any inferred budget, competition or score remains an estimate until confirmed at the source.
-
-## What it can do
-
-- **Multi-source discovery** — public Hacker News search, GitHub issues, Bluesky public search, selected SaaS communities and configurable RSS/Atom feeds.
-- **Buyer-oriented matching** — technical keyword groups, intent aliases, contextual phrases and rule-based scoring.
-- **Commercial triage** — separate potential customers from sellers, educational questions and incompatible requirements; maintain P0/P1/P2/reject classifications.
-- **Optional LLM review** — classify candidates and prepare concise, evidence-based action briefs, with configurable daily/monthly usage controls.
-- **Local tracking** — persist collected records, decisions, feedback and outreach state in SQLite; avoid repeat notifications.
-- **Optional Telegram notifications** — notify only when explicitly configured. The tool **does not** automatically message prospective customers.
-- **Read-only diagnostics** — inspect the stored source funnel without mutating the database or calling any external model.
-
-## Development history
-
-This repository includes the **actual development commit sequence** rather than a single squashed source snapshot. The main branch retains **18 development commits dated 6–9 October 2026**, followed by public-release preparation and an IntentScout branding commit. Two original alternative commits are preserved in `archive/rss-alternative` and `archive/roi-alternative`.
-
-For privacy, the public history was reconstructed from the original commit graph: personal author emails, private RSS identifiers and operator-specific text were replaced across **every historical commit**. Original dates, subjects and parent relationships are preserved. As a result, historical commit **SHA IDs differ** from those of the local private repository. No personal SQLite database or credentials are included in any public revision.
-
-See [History and privacy](docs/history-and-privacy.md) for verification details and [Publishing safely](docs/publishing-safely.md) before adding a remote.
-
-## How it works
-
-```mermaid
-flowchart TD
-    S[Public APIs & communities] --> C[Collectors]
-    RSS[Configured RSS / Alerts] --> C
-    MAN[Manual public-post import] --> C
-    C --> M[Technical & intent matching]
-    M --> SC[Commercial scoring & buyer/seller checks]
-    SC --> DB[(Local SQLite)]
-    DB --> R[Buyer board / shortlist]
-    R --> L{LLM review enabled?}
-    L -->|No| H[Human review]
-    L -->|Yes| G[Optional precision review & brief]
-    G --> H
-    H --> A[Manual outreach & tracked outcomes]
-    DB -. read-only .-> D[Funnel diagnostic]
-    G -. optional .-> T[Telegram alerts]
-```
-
-The pipeline has deliberately different layers: *technical relevance* is not the same as *hiring intent*, and hiring intent is not proof of *budget or suitability*.
-
-## Public-source coverage
-
-| Source | Collection approach |
-| --- | --- |
-| Hacker News | Public HN/Algolia search |
-| GitHub | Public issue search; optional token for authenticated API rate limits |
-| Bluesky | Public search endpoints |
-| Make, n8n | Public Discourse discussions |
-| Shopify, Airtable, Zapier, Bubble, Retool, Xano, FlutterFlow | Selected public community endpoints/pages |
-| RSS / Google Alerts | Public feed definitions plus **local, untracked** personal feed URLs |
-| LinkedIn, Reddit, X, Facebook, Threads, Telegram, Discord | **Manual import of publicly visible post text**; not private-session scraping |
-
-Source reach, freshness and reliability vary. A working collector does **not** guarantee that a source currently contains paid work.
+Social posts from platforms without a supported public collector can be added manually. IntentScout does not use private sessions or automate direct messages.
 
 ## Quick start
 
-**Requirements:** Python 3.11+; internet access for live collectors. No paid API or Telegram token is required for a basic run.
+Requires Python 3.11+ and an internet connection for live collection.
 
 **Windows PowerShell**
 
 ```powershell
+git clone https://github.com/SerDrozd/intentscout.git
+cd intentscout
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install -e .
 Copy-Item .env.example .env
-python -m lead_radar --help
 python -m lead_radar once
 python -m lead_radar buyer-board --days 3 --limit 20
-python -m lead_radar shortlist --limit 20
 ```
 
 **macOS / Linux**
 
 ```bash
+git clone https://github.com/SerDrozd/intentscout.git
+cd intentscout
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev]'
+python -m pip install -e .
 cp .env.example .env
 python -m lead_radar once
 python -m lead_radar buyer-board --days 3 --limit 20
 ```
 
-The first run creates a local SQLite database at `data/radar.db` and requests public sources enabled in `.env`. Depending on network availability, some source requests may fail or return zero matches; review the console output before drawing conclusions.
+The first run creates `data/radar.db`. The example configuration enables several public collectors, so results depend on source availability and the current search window. An empty result does not necessarily mean there are no relevant requests.
 
-> **Safe starting configuration:** the supplied `.env.example` disables LLM calls and leaves Telegram credentials empty. Do not enable paid models without reviewing the model ID, pricing settings and usage limits.
+LLM calls are disabled in `.env.example`, and Telegram credentials are blank. Neither is required for the basic workflow.
 
-### Configuration
+## Reviewing leads
 
-Edit your local `.env` (already excluded from Git). Common options:
+The collection pipeline has three main stages:
+
+1. Collect recent posts from configured sources and match technical terms.
+2. Evaluate buyer intent, commercial language, and suitability. A seller's post or an ordinary support question should not become a high-priority lead just because it contains the right keywords.
+3. Store results for review, with optional LLM classification and an action brief before any manual outreach.
+
+The CLI distinguishes higher-priority candidates from lower-confidence records, but the classifications are estimates. Budget, competition, location requirements, and whether the request is still open must be checked at the original source.
+
+Useful commands:
+
+| Command | What it does |
+| --- | --- |
+| `python -m lead_radar once` | Run a single collection cycle |
+| `python -m lead_radar run` | Keep collecting at configured intervals |
+| `python -m lead_radar recent --limit 20` | Show recently stored matches |
+| `python -m lead_radar buyer-board --days 3 --limit 20` | Review possible buyers |
+| `python -m lead_radar shortlist --limit 20` | Show the current P0/P1 shortlist |
+| `python -m lead_radar stats` | Show local database totals |
+| `python -m lead_radar roi --days 30 --by source` | Inspect source-level outcomes |
+| `python -m lead_radar alerts-plan` | Review suggested Google Alerts queries |
+
+Run `python -m lead_radar --help` for the full CLI.
+
+## Configuration
+
+Settings live in the local `.env` file. The main switches include:
 
 ```dotenv
 RADAR_DB=./data/radar.db
@@ -131,71 +93,53 @@ MAKE_ENABLED=true
 N8N_ENABLED=true
 RSS_ENABLED=true
 LLM_ENABLED=false
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
 ```
 
-Public, non-account-specific keyword and feed definitions are in `config/`. To add a personal Google Alerts feed, use the CLI's `alerts-plan` / `alerts-add` workflow: real feed URLs belong in **`config/feeds.local.yaml`**, never `config/feeds.yaml` or Git. See `config/feeds.local.example.yaml` for the format.
+Source and keyword definitions are under `config/`. Personal Google Alerts URLs belong in `config/feeds.local.yaml`, which is excluded from Git. An example file is provided at `config/feeds.local.example.yaml`.
 
-LLM classification is optional. To use it, set `LLM_ENABLED=true`, supply a valid `OPENAI_API_KEY` and model identifier in your **local** `.env`, and verify the budget/pricing fields. Cost controls are application estimates, not a billing guarantee.
+LLM review and Telegram notifications are optional. If enabling LLM calls, set your API credentials and model in `.env` and check the configured usage and price limits first. The application's cost estimates are not a substitute for provider billing data.
 
-## Command reference
+## Funnel diagnostics
 
-| Command | Purpose |
-| --- | --- |
-| `python -m lead_radar once` | Execute one collection and scoring cycle |
-| `python -m lead_radar run` | Poll continuously with configured intervals |
-| `python -m lead_radar recent --limit 20` | Inspect stored matches |
-| `python -m lead_radar buyer-board --days 3 --limit 20` | Review buyer-like records |
-| `python -m lead_radar shortlist --limit 20` | Show prioritized actionable candidates |
-| `python -m lead_radar stats` | Local database summary |
-| `python -m lead_radar roi --days 30 --by source` | Source-level tracked outcomes |
-| `python -m lead_radar optimize --days 30` | Read-only source/query recommendations |
-| `python -m lead_radar alerts-plan` | Review suggested Google Alerts queries |
-| `python -m lead_radar social-plan` | Preview supported social discovery routes |
-| `python -m lead_radar prepare --id 123` | Optional, configured LLM action brief for an existing lead |
+IntentScout includes a read-only report for understanding what the collectors are actually finding:
 
-CLI options and commands may evolve; `python -m lead_radar --help` is the source of truth.
-
-### Commercial funnel diagnostic
-
-The standalone audit reads an **existing** SQLite database in read-only mode. It reports source activity, stored fresh original topics, reply/comment proportions, buyer-like heuristics and bounded manual-review candidates.
-
-```powershell
-python -m lead_radar.funnel_audit --db .\data\radar.db --hours 24 --limit 10
+```bash
+python -m lead_radar.funnel_audit --db ./data/radar.db --hours 24 --limit 10
 ```
 
-For structured output:
+For JSON output:
 
 ```bash
 python -m lead_radar.funnel_audit --db ./data/radar.db --hours 24 --format json
 ```
 
-The diagnostic makes **no outbound network calls, API calls or database writes**. It cannot recover items rejected before being stored, and it cannot verify whether an external buyer is still accepting proposals. See [diagnostic methodology](docs/funnel-diagnostic.md).
+The report separates stored original topics from replies where source metadata allows it, summarizes activity by source, and surfaces a small set of records worth checking manually. It does not modify SQLite or call external APIs.
 
-## Project layout
+It can only examine records that reached the database. Posts rejected before storage remain outside the report. See [funnel diagnostic methodology](docs/funnel-diagnostic.md).
+
+## Code layout
 
 ```text
-intentscout/
-├── lead_radar/
-│   ├── collectors/       # Public-source adapters
-│   ├── app.py            # Orchestration
-│   ├── commercial.py     # Buyer/intent filtering
-│   ├── matcher.py        # Technical and linguistic matching
-│   ├── scoring.py        # Rule-based relevance scores
-│   ├── database.py       # SQLite persistence
-│   ├── llm.py            # Optional precision gate
-│   ├── telegram.py       # Optional notifications
-│   └── funnel_audit.py   # Read-only local diagnostics
-├── config/               # Public example/query definitions
-├── tests/                # Unit and regression tests
-├── docs/                 # Methodology and privacy notes
-├── scripts/              # Public-release safety check
-├── .env.example          # Credentials deliberately blank
-└── pyproject.toml
+lead_radar/
+├── collectors/       Public-source adapters
+├── app.py            Collection orchestration
+├── matcher.py        Technical and intent matching
+├── commercial.py     Buyer/seller and commercial filters
+├── scoring.py        Relevance scoring
+├── database.py       SQLite storage
+├── llm.py            Optional LLM review
+├── telegram.py       Optional notifications
+└── funnel_audit.py   Read-only diagnostics
+
+config/                Source and query definitions
+tests/                 Unit and regression tests
+docs/                  Notes on diagnostics and privacy
+scripts/               Public-release checks
 ```
 
-## Development and validation
+## Development
+
+Install development dependencies and run the checks:
 
 ```bash
 python -m pip install -e '.[dev]'
@@ -204,37 +148,27 @@ mypy lead_radar
 python -m pytest -q
 python -m compileall -q lead_radar
 python scripts/check_public_release.py
+python scripts/check_public_history.py
 ```
 
-All tests use synthetic data or mocked external requests; the test suite does not require real customer records, Telegram credentials or LLM calls. GitHub Actions runs linting, typing, tests and the public-release check on pushes and pull requests.
+The tests use synthetic records and mocked network calls. GitHub Actions runs these checks on supported Python versions.
 
-## Privacy & security
+The repository retains the development commit history, with personal data removed from the public revisions. The two alternative historical branches are kept separately and are not meant to be merged into `main`. See [history and privacy](docs/history-and-privacy.md) for details.
 
-The published project must not contain personal lead databases, tracked opportunities, outreach history, raw logs, local contact information, API keys, private Google Alerts RSS URLs, real `.env` files or developer machine paths.
+## Data and security
 
-This release is a **fresh, curated source export**, with **no previous Git history**. The file exclusions and `scripts/check_public_release.py` provide defense in depth, not proof that every possible secret is detectable. Before any public push, inspect the exact staged file list and diff; set your Git author email to your GitHub **no-reply address** so commit metadata does not disclose your personal email. Full checklist: [publishing safely](docs/publishing-safely.md).
+The database, logs, API tokens, Telegram settings, and personal feed URLs stay on the machine running IntentScout. They are excluded from the public repository. The release checks look for known sensitive files and patterns in both the working tree and Git history, but they cannot detect every possible secret.
 
-This repository uses only public interfaces and permitted manual imports; it does not attempt to bypass private login sessions, rate limits or platform access controls. Follow each source's published terms.
+Use public endpoints in line with each service's terms. The tool does not send outreach messages or attempt to access private accounts.
+
+## Current limitations
+
+- A possible hiring signal is not a verified paid opportunity.
+- Source coverage is incomplete, and public endpoints can fail or change without notice.
+- Reply counts and other competition signals can become outdated.
+- Strict filters may miss legitimate requests; the funnel report cannot measure everything rejected before storage.
+- LLM judgments and suggested prices still need human review.
 
 ## License
 
-No software license is included in this release. Public visibility does not itself grant permission to reuse or redistribute the code. A license can be selected separately.
-
-## Limitations
-
-- **Buyer intent is inferred**, not independently verified. No automatic system can promise an open paid contract.
-- **Historical competition counts can become stale.** Check the original thread before reaching out.
-- **Funnel diagnostics describe stored items only.** Pre-insertion exclusions are outside their visibility.
-- **Coverage is incomplete.** Public endpoints can change or reject requests; not all platforms are searched directly.
-- **LLM judgments may be wrong.** The human operator is responsible for qualification, communication and the final decision.
-- **No automatic outreach.** The software is a discovery and review assistant, not an email/DM spam bot.
-
----
-
-<div align="center">
-
-**Built around one principle: fewer unverified leads, more informed decisions.**
-
-*Independent project. Not affiliated with any of the data-source platforms.*
-
-</div>
+No license has been assigned to this release.
