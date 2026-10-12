@@ -45,7 +45,7 @@ class GitHubCollector:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2026-03-10",
-            "User-Agent": "technical-api-problem-radar/0.1",
+            "User-Agent": "intentscout/0.1",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"

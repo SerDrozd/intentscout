@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "buyer-intent-radar"
+name = "intentscout"
 description = "Local-first discovery and triage of technical buyer-intent signals"
 readme = "README.md"
 version = "0.16.0"

@@ -1,6 +1,6 @@
 <div align="center">
 
-# Buyer Intent Radar
+# IntentScout
 
 **Find the technical problem. Verify the buyer. Decide whether to act.**
 
@@ -22,7 +22,7 @@ A local-first Python system for discovering, evaluating and tracking public requ
 
 Finding technical discussions is easy. Finding someone who **actually wants to hire a developer and may pay for a specific fix** is not.
 
-Buyer Intent Radar explores public sources, identifies relevant language, applies commercial and suitability filters, and helps a human review the strongest candidates. It is designed to distinguish:
+IntentScout explores public sources, identifies relevant language, applies commercial and suitability filters, and helps a human review the strongest candidates. It is designed to distinguish:
 
 | Signal | Interpretation |
 | --- | --- |
@@ -45,7 +45,7 @@ Buyer Intent Radar explores public sources, identifies relevant language, applie
 
 ## Development history
 
-This repository includes the **actual development commit sequence** rather than a single squashed source snapshot. The main branch retains **18 development commits dated 6–9 October 2026**, followed by a public-release cleanup. Two original alternative commits are preserved in `archive/rss-alternative` and `archive/roi-alternative`.
+This repository includes the **actual development commit sequence** rather than a single squashed source snapshot. The main branch retains **18 development commits dated 6–9 October 2026**, followed by public-release preparation and an IntentScout branding commit. Two original alternative commits are preserved in `archive/rss-alternative` and `archive/roi-alternative`.
 
 For privacy, the public history was reconstructed from the original commit graph: personal author emails, private RSS identifiers and operator-specific text were replaced across **every historical commit**. Original dates, subjects and parent relationships are preserved. As a result, historical commit **SHA IDs differ** from those of the local private repository. No personal SQLite database or credentials are included in any public revision.
 
@@ -176,7 +176,7 @@ The diagnostic makes **no outbound network calls, API calls or database writes**
 ## Project layout
 
 ```text
-buyer-intent-radar/
+intentscout/
 ├── lead_radar/
 │   ├── collectors/       # Public-source adapters
 │   ├── app.py            # Orchestration

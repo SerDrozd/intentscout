@@ -15,12 +15,12 @@ This release intentionally retains the actual development timeline while rewriti
 Create a new **empty** GitHub repository, without GitHub's automatic README, license, or `.gitignore` init. Then run in the **sanitized** folder:
 
 ```powershell
-git remote add origin https://github.com/SerDrozd/buyer-intent-radar.git
+git remote add origin https://github.com/SerDrozd/intentscout.git
 git push -u origin main
 git push origin archive/rss-alternative archive/roi-alternative
 ```
 
-The default branch shows the 18 sequential engineering commits plus the public-release commit. The two archived experiments remain available under their respective branches. `git log --all` shows every development commit.
+The default branch shows the 18 sequential engineering commits, a public-release commit, and the IntentScout branding commit. The two archived experiments remain available under their respective branches. `git log --all` shows every development commit.
 
 Do not use `git push --mirror` or `git push --force` on an existing repository. Use a genuinely empty new repository to avoid modifying unrelated history.
 

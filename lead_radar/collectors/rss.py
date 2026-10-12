@@ -359,7 +359,7 @@ class RSSCollector:
 
         semaphore = asyncio.Semaphore(self.concurrency)
         timeout = httpx.Timeout(20.0)
-        headers = {"User-Agent": "technical-api-problem-radar/0.7"}
+        headers = {"User-Agent": "intentscout/0.7"}
 
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True) as client:
             async def run(feed: FeedDefinition) -> list[Opportunity]:

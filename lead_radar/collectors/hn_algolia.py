@@ -85,7 +85,7 @@ class HackerNewsAlgoliaCollector:
         now = datetime.now(timezone.utc)
         out: dict[str, Opportunity] = {}
         timeout = httpx.Timeout(20.0)
-        headers = {"User-Agent": "technical-api-problem-radar/0.6", "Accept": "application/json"}
+        headers = {"User-Agent": "intentscout/0.6", "Accept": "application/json"}
 
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             for family in self._selected_queries():

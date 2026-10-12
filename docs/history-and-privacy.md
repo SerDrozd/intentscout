@@ -2,7 +2,7 @@
 
 ## Scope
 
-- `main`: 18 genuine development commits from **6–9 October 2026**, in their original parent order, plus a separate public-release commit.
+- `main`: 18 genuine development commits from **6–9 October 2026**, in their original parent order, plus separate public-release and IntentScout branding commits.
 - `archive/rss-alternative` and `archive/roi-alternative`: 2 historical alternative commits branching off the main development lineage. These are preserved but are not merged into the default branch.
 - The original dates, subjects and ancestry are retained. The author/committer identity in the public history uses the GitHub profile handle and no-reply email.
 

@@ -24,7 +24,7 @@ class HackerNewsCollector:
 
     async def collect(self) -> list[Opportunity]:
         timeout = httpx.Timeout(20.0)
-        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": "technical-api-problem-radar/0.1"}) as client:
+        async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": "intentscout/0.1"}) as client:
             r = await client.get(f"{BASE}/maxitem.json")
             r.raise_for_status()
             current_max = int(r.json())
